@@ -1,14 +1,11 @@
-FROM hseeberger/scala-sbt:15.0.2_1.4.7_2.13.4
-
+FROM hseeberger/scala-sbt:15.0.2_1.4.7_2.13.4 AS build
 COPY . /goldrush/
-
 WORKDIR /goldrush
-
 RUN sbt '; set assemblyJarName in assembly := "app.jar"\
     ; set assemblyOutputPath in assembly := new File("/app/app.jar")\
     ;  assembly'
 
-RUN rm -rf /goldrush
-
-WORKDIR /app
+FROM openjdk:15.0.2 AS run
+WORKDIR /goldrush
+COPY --from=build /app/app.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]
