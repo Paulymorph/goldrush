@@ -1,85 +1,135 @@
 package goldrush
 
+import cats.effect.Sync
 import cats.{Functor, MonadError}
 import io.circe
 import io.circe.generic.auto._
+import org.typelevel.log4cats.StructuredLogger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 import retry.{RetryPolicies, RetryPolicy, Sleep}
 import sttp.client3.circe._
-import sttp.client3.{Response, ResponseException, SttpBackend, UriContext, emptyRequest}
+import sttp.client3.{
+  Response,
+  ResponseException,
+  SttpBackend,
+  UriContext,
+  emptyRequest
+}
 
-class Client[F[_] : Functor: Sleep](baseUrl: String, backend: SttpBackend[F, Any])(implicit E: MonadError[F, Throwable]) {
+trait Client[F[_]] {
+  def getBalance(): F[Balance]
+  def listLicenses(): F[Seq[License]]
+  def issueLicense(coins: Int*): F[License]
+  def explore(area: Area): F[ExploreResponse]
+  def dig(licenseId: String, posX: Int, posY: Int, depth: Int): F[Seq[String]]
+  def cash(treasure: String): F[Seq[Int]]
+}
+
+class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
+    baseUrl: String,
+    backend: SttpBackend[F, Any]
+)(implicit E: MonadError[F, Throwable])
+    extends Client[F] {
   private val infPolicy: RetryPolicy[F] = {
     import scala.concurrent.duration._
-    RetryPolicies.limitRetriesByDelay(8.seconds, RetryPolicies.fullJitter(40.millis))
+    RetryPolicies.limitRetriesByDelay(
+      8.seconds,
+      RetryPolicies.fullJitter(40.millis)
+    )
   }
 
   def getBalance(): F[Balance] = {
     val request =
-      emptyRequest.get(uri"$baseUrl/balance")
+      emptyRequest
+        .get(uri"$baseUrl/balance")
         .response(asJsonEither[ApiError, Balance])
 
-    unwrapInf {
+    unwrapInf("getBalance") {
       backend.send(request)
     }
   }
 
   def listLicenses(): F[Seq[License]] = {
     val request =
-      emptyRequest.get(uri"$baseUrl/licenses")
+      emptyRequest
+        .get(uri"$baseUrl/licenses")
         .response(asJsonEither[ApiError, Seq[License]])
-    unwrapInf {
+    unwrapInf("listLicences") {
       backend.send(request)
     }
   }
 
   def issueLicense(coins: Int*): F[License] = {
     val request =
-      emptyRequest.post(uri"$baseUrl/licenses")
+      emptyRequest
+        .post(uri"$baseUrl/licenses")
+        .body(coins)
         .response(asJsonEither[ApiError, License])
-    unwrapInf {
+    unwrapInf("issueLicense") {
       backend.send(request)
     }
   }
 
   def explore(area: Area): F[ExploreResponse] = {
     val request =
-      emptyRequest.post(uri"$baseUrl/explore")
+      emptyRequest
+        .post(uri"$baseUrl/explore")
         .body(area)
         .response(asJsonEither[ApiError, ExploreResponse])
-    unwrapInf {
+    unwrapInf("explore") {
       backend.send(request)
     }
   }
 
-  def dig(licenseId: String, posX: Int, posY: Int, depth: Int): F[Seq[String]] = {
+  def dig(
+      licenseId: String,
+      posX: Int,
+      posY: Int,
+      depth: Int
+  ): F[Seq[String]] = {
     val r = DigRequest(licenseId, posX, posY, depth)
     val request =
-      emptyRequest.post(uri"$baseUrl/dig")
+      emptyRequest
+        .post(uri"$baseUrl/dig")
         .body(r)
         .response(asJsonEither[ApiError, Seq[String]])
-    unwrapInf {
+    unwrapInf("dig") {
       backend.send(request)
     }
   }
 
   def cash(treasure: String): F[Seq[Int]] = {
     val request =
-      emptyRequest.post(uri"$baseUrl/cash")
+      emptyRequest
+        .post(uri"$baseUrl/cash")
         .body(treasure)
         .response(asJsonEither[ApiError, Seq[Int]])
-    unwrapInf {
+    unwrapInf("cash") {
       backend.send(request)
     }
   }
 
-  private def unwrapInf[T](request: F[Response[Either[ResponseException[ApiError, circe.Error], T]]]): F[T] = {
+  private def unwrapInf[T](operation: String)(
+      request: F[Response[Either[ResponseException[ApiError, circe.Error], T]]]
+  ): F[T] = {
     import cats.syntax.functor._
     import cats.syntax.monadError._
     import retry.syntax.all._
 
-    request.map(_.body)
+    request
+      .map(_.body)
       .rethrow
-      .retryingOnAllErrors(infPolicy, retry.noop)
+      .retryingOnAllErrors(
+        infPolicy,
+        (error, retry) => {
+          val context = Map(
+            "time" -> retry.retriesSoFar.toString,
+            "operation" -> operation,
+            "cumulativeDelay" -> retry.cumulativeDelay.toString
+          )
+          StructuredLogger[F].warn(context, error)("Retrying")
+        }
+      )
   }
 }
 
@@ -92,6 +142,19 @@ case class Area(posX: Int, posY: Int, sizeX: Int, sizeY: Int) {
       x = posX + dx - 1
       y = posY + dy - 1
     } yield (x, y)
+  }
+}
+
+object ClientImpl {
+  def apply[F[_]: Functor: Sleep: Sync](
+      baseUrl: String,
+      backend: SttpBackend[F, Any]
+  )(implicit E: MonadError[F, Throwable]): F[Client[F]] = {
+    import cats.syntax.functor._
+
+    Slf4jLogger.create[F].map { implicit logger =>
+      new ClientImpl[F](baseUrl, backend)
+    }
   }
 }
 

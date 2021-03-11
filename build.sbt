@@ -28,8 +28,15 @@ libraryDependencies ++= Seq(
   "io.circe" %% "circe-parser"
 ).map(_ % circe)
 
+val log4cats = "1.2.0"
+libraryDependencies += "org.typelevel" %% "log4cats-slf4j" % log4cats
+
+val logging = "1.7.30"
+libraryDependencies += "org.slf4j" % "slf4j-simple" % logging
+
 assemblyMergeStrategy in assembly := {
   case PathList("META-INF", _) => MergeStrategy.discard
-  case PathList(properties, _) if properties.endsWith(".properties") => MergeStrategy.first
+  case PathList(properties, _) if properties.endsWith(".properties") =>
+    MergeStrategy.first
   case _ => MergeStrategy.deduplicate
 }
