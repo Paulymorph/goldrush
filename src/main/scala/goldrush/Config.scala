@@ -9,9 +9,10 @@ object Config {
       env("ADDRESS", "default"),
       env("Port", "8000"),
       env("Schema", "http")
-    ).mapN {(address, port, schema) =>
+    ).mapN { (address, port, schema) =>
       s"$schema://$address:$port"
     }
 
-  private def env[F[_]: Sync](name: String, default: String): F[String] = Sync[F].delay(sys.env.getOrElse(name, default))
+  private def env[F[_]: Sync](name: String, default: String): F[String] =
+    Sync[F].delay(sys.env.getOrElse(name, default))
 }

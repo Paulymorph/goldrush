@@ -21,7 +21,7 @@ trait Client[F[_]] {
   def listLicenses(): F[Seq[License]]
   def issueLicense(coins: Int*): F[License]
   def explore(area: Area): F[ExploreResponse]
-  def dig(licenseId: String, posX: Int, posY: Int, depth: Int): F[Seq[String]]
+  def dig(licenseId: Int, posX: Int, posY: Int, depth: Int): F[Seq[String]]
   def cash(treasure: String): F[Seq[Int]]
 }
 
@@ -32,8 +32,8 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
     extends Client[F] {
   private val infPolicy: RetryPolicy[F] = {
     import scala.concurrent.duration._
-    RetryPolicies.limitRetriesByDelay(
-      8.seconds,
+    RetryPolicies.capDelay(
+      5.seconds,
       RetryPolicies.fullJitter(40.millis)
     )
   }
@@ -82,7 +82,7 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
   }
 
   def dig(
-      licenseId: String,
+      licenseId: Int,
       posX: Int,
       posY: Int,
       depth: Int
@@ -162,8 +162,8 @@ case class ExploreResponse(area: Area, amount: Int)
 
 case class Balance(balance: Int, wallet: Seq[Int])
 
-case class License(id: String, digAllowed: Int, digUsed: Int)
+case class License(id: Int, digAllowed: Int, digUsed: Int)
 
-case class DigRequest(licenseId: String, posX: Int, posY: Int, depth: Int)
+case class DigRequest(licenseId: Int, posX: Int, posY: Int, depth: Int)
 
 case class ApiError(code: Int, message: String)
