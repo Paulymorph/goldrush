@@ -9,12 +9,14 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import retry.{RetryPolicies, RetryPolicy, Sleep}
 import sttp.client3.circe._
 import sttp.client3.{
+  HttpError,
   Response,
   ResponseException,
   SttpBackend,
   UriContext,
   emptyRequest
 }
+import sttp.model.{MediaType, StatusCode}
 
 trait Client[F[_]] {
   def getBalance(): F[Balance]
@@ -88,11 +90,17 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
       depth: Int
   ): F[Seq[String]] = {
     val r = DigRequest(licenseId, posX, posY, depth)
+    import cats.syntax.either._
+    val notFoundExpected = asJsonEither[ApiError, Seq[String]].map {
+      _.recover { case HttpError(_, StatusCode.NotFound) =>
+        Seq.empty
+      }
+    }
     val request =
       emptyRequest
         .post(uri"$baseUrl/dig")
         .body(r)
-        .response(asJsonEither[ApiError, Seq[String]])
+        .response(notFoundExpected)
     unwrapInf("dig") {
       backend.send(request)
     }
@@ -102,7 +110,8 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
     val request =
       emptyRequest
         .post(uri"$baseUrl/cash")
-        .body(treasure)
+        .body(s""""$treasure"""")
+        .contentType(MediaType.ApplicationJson)
         .response(asJsonEither[ApiError, Seq[Int]])
     unwrapInf("cash") {
       backend.send(request)

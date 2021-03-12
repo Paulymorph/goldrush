@@ -12,7 +12,9 @@ case class Miner[F[_]: Sync: Parallel: Applicative](client: Client[F]) {
     val licenses: Iterant[F, Int] = Iterant[F]
       .repeatEvalF(client.issueLicense())
       .mapBatch { license =>
-        Batch.fromSeq(Seq.fill(license.digAllowed)(license.id))
+        Batch.fromSeq(
+          Seq.fill(license.digAllowed - license.digUsed)(license.id)
+        )
       }
 
     val explorator = {
@@ -31,7 +33,7 @@ case class Miner[F[_]: Sync: Parallel: Applicative](client: Client[F]) {
     }
 
     val digger = {
-      val seed = (0 -> Seq.empty[String]).pure[F]
+      val seed = (1 -> Seq.empty[String]).pure[F]
 
       explorator
         .mapEval { case (x, y, amount) =>
@@ -41,7 +43,7 @@ case class Miner[F[_]: Sync: Parallel: Applicative](client: Client[F]) {
                 val nextTreasures = newTreasures ++ foundTreasures
                 val result = level + 1 -> nextTreasures
                 Either.cond(
-                  level >= 9 || nextTreasures.size >= amount,
+                  level >= 10 || nextTreasures.size >= amount,
                   result,
                   result
                 )
