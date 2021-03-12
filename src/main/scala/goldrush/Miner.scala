@@ -1,10 +1,10 @@
 package goldrush
 
-import cats.effect.concurrent.MVar
 import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.applicative._
 import cats.syntax.functor._
 import cats.{Applicative, Parallel}
+import monix.catnap.ConcurrentQueue
 import monix.tail.Iterant
 import monix.tail.batches.Batch
 
@@ -14,19 +14,18 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
   def mine: F[Int] = {
     val licensesR: Resource[F, Iterant[F, Int]] = {
       for {
-        queue <- Resource.liftF(MVar.empty[F, Int])
+        queue <- Resource.liftF(ConcurrentQueue.bounded[F, Int](3))
         _ <- Concurrent[F].background {
           Iterant[F]
             .repeatEvalF(client.issueLicense())
-            .mapBatch { license =>
-              Batch.fromSeq(
+            .mapEval { license =>
+              val licensesUses =
                 Seq.fill(license.digAllowed - license.digUsed)(license.id)
-              )
+              queue.offerMany(licensesUses)
             }
-            .mapEval(l => queue.put(l))
             .completedL
         }
-      } yield Iterant[F].repeatEvalF(queue.take)
+      } yield Iterant[F].repeatEvalF(queue.poll)
     }
 
     val explorator = {
