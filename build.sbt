@@ -8,7 +8,8 @@ val monix = "3.3.0"
 libraryDependencies ++=
   Seq(
     "io.monix" %% "monix",
-    "io.monix" %% "monix-tail"
+    "io.monix" %% "monix-tail",
+    "io.monix" %% "monix-reactive"
   ).map(_ % monix)
 
 val sttp = "3.1.3"

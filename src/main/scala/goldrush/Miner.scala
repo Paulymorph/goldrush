@@ -1,21 +1,33 @@
 package goldrush
 
-import cats.effect.Sync
+import cats.effect.concurrent.MVar
+import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.applicative._
 import cats.syntax.functor._
 import cats.{Applicative, Parallel}
 import monix.tail.Iterant
 import monix.tail.batches.Batch
 
-case class Miner[F[_]: Sync: Parallel: Applicative](client: Client[F]) {
+case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
+    client: Client[F]
+) {
   def mine: F[Int] = {
-    val licenses: Iterant[F, Int] = Iterant[F]
-      .repeatEvalF(client.issueLicense())
-      .mapBatch { license =>
-        Batch.fromSeq(
-          Seq.fill(license.digAllowed - license.digUsed)(license.id)
-        )
-      }
+    val licensesR: Resource[F, Iterant[F, Int]] = {
+      for {
+        queue <- Resource.liftF(MVar.empty[F, Int])
+        _ <- Concurrent[F].background {
+          Iterant[F]
+            .repeatEvalF(client.issueLicense())
+            .mapBatch { license =>
+              Batch.fromSeq(
+                Seq.fill(license.digAllowed - license.digUsed)(license.id)
+              )
+            }
+            .mapEval(l => queue.put(l))
+            .completedL
+        }
+      } yield Iterant[F].repeatEvalF(queue.take)
+    }
 
     val explorator = {
       val sideSize = 3500
@@ -35,24 +47,26 @@ case class Miner[F[_]: Sync: Parallel: Applicative](client: Client[F]) {
     val digger = {
       val seed = (1 -> Seq.empty[String]).pure[F]
 
-      explorator
-        .mapEval { case (x, y, amount) =>
-          licenses.foldWhileLeftEvalL(seed) {
-            case ((level, foundTreasures), license) =>
-              client.dig(license, x, y, level).map { newTreasures =>
-                val nextTreasures = newTreasures ++ foundTreasures
-                val result = level + 1 -> nextTreasures
-                Either.cond(
-                  level >= 10 || nextTreasures.size >= amount,
-                  result,
-                  result
-                )
-              }
+      Iterant.fromResource(licensesR).flatMap { licenses =>
+        explorator
+          .mapEval { case (x, y, amount) =>
+            licenses.foldWhileLeftEvalL(seed) {
+              case ((level, foundTreasures), license) =>
+                client.dig(license, x, y, level).map { newTreasures =>
+                  val nextTreasures = newTreasures ++ foundTreasures
+                  val result = level + 1 -> nextTreasures
+                  Either.cond(
+                    level >= 10 || nextTreasures.size >= amount,
+                    result,
+                    result
+                  )
+                }
+            }
           }
-        }
-        .mapBatch { case (_, treasures) =>
-          Batch.fromSeq(treasures)
-        }
+          .mapBatch { case (_, treasures) =>
+            Batch.fromSeq(treasures)
+          }
+      }
     }
 
     val coins = digger

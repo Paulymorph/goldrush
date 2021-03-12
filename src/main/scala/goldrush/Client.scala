@@ -136,7 +136,7 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
             "operation" -> operation,
             "cumulativeDelay" -> retry.cumulativeDelay.toString
           )
-          StructuredLogger[F].warn(context, error)("Retrying")
+          StructuredLogger[F].warn(context, error)(s"Retrying $operation")
         }
       )
   }
