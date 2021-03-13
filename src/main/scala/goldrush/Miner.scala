@@ -4,40 +4,41 @@ import cats.effect.concurrent.Ref
 import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
-import cats.syntax.applicative._
 import cats.syntax.parallel._
 import cats.{Applicative, Parallel}
 import monix.catnap.ConcurrentQueue
-import monix.tail.Iterant
-import monix.tail.batches.Batch
+import monix.eval.{TaskLift, TaskLike}
+import monix.reactive.Observable
 
-case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
+case class Miner[F[
+    _
+]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
     client: Client[F]
 ) {
   def mine: F[Int] = {
-    val licensesR: Resource[F, Iterant[F, Int]] = {
+    val licensesR: Resource[F, Observable[Int]] = {
       for {
         queue <- Resource.liftF(ConcurrentQueue.bounded[F, Int](3))
         _ <- Concurrent[F].background {
-          Iterant[F]
+          Observable
             .repeatEvalF(client.issueLicense())
-            .mapEval { license =>
+            .mapEvalF { license =>
               val licensesUses =
                 Seq.fill(license.digAllowed - license.digUsed)(license.id)
               queue.offerMany(licensesUses)
             }
-            .completedL
+            .completedF[F]
         }
-      } yield Iterant[F].repeatEvalF(queue.poll)
+      } yield Observable.repeatEvalF(queue.poll)
     }
 
     val explorator = {
       val sideSize = 3500
-      val side = Iterant[F].fromIterable(0 until sideSize)
-      val coords = side.flatMap(x => side.flatMap(y => Iterant.pure(x, y)))
+      val side = Observable.fromIterable(0 until sideSize)
+      val coords = side.flatMap(x => side.flatMap(y => Observable.pure(x, y)))
 
       coords
-        .mapEval { case (x, y) =>
+        .mapEvalF { case (x, y) =>
           client.explore(Area(x, y, 1, 1))
         }
         .filter(_.amount > 0)
@@ -47,38 +48,42 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
     }
 
     val digger = {
-      Iterant.fromResource(licensesR).flatMap { licenses =>
-        explorator
-          .mapEval { case (area, amount) =>
-            for {
-              foundTreasures <- Ref[F].of(Seq.empty[String])
-              _ <- area.locations.parTraverse { case (x, y) =>
-                licenses.foldWhileLeftEvalL(1.pure) { case (level, license) =>
-                  for {
-                    newTreasures <- client.dig(license, x, y, level)
-                    nextTreasures <- foundTreasures
-                      .getAndUpdate(_ ++ newTreasures)
-                    result = level + 1
-                  } yield Either.cond(
-                    level >= 10 || nextTreasures.size >= amount,
-                    result,
-                    result
-                  )
+      Observable
+        .fromResource(licensesR)
+        .flatMap { licenses =>
+          explorator
+            .mapEvalF { case (area, amount) =>
+              for {
+                foundTreasures <- Ref[F].of(Seq.empty[String])
+                _ <- area.locations.parTraverse { case (x, y) =>
+                  val licenseF = TaskLift[F].apply(licenses.firstL)
+
+                  def dig(level: Int): F[Unit] = {
+                    for {
+                      license <- licenseF
+                      newTreasures <- client.dig(license, x, y, level)
+                      nextTreasures <- foundTreasures
+                        .getAndUpdate(_ ++ newTreasures)
+                      goDeeper = level >= 10 || nextTreasures.size >= amount
+                      _ <- if (goDeeper) dig(level + 1) else Applicative[F].unit
+                    } yield ()
+                  }
+
+                  dig(1)
                 }
-              }
-              result <- foundTreasures.get
-            } yield result
-          }
-          .mapBatch(a => Batch.fromSeq(a))
-      }
+                result <- foundTreasures.get
+              } yield result
+            }
+        }
+        .flatMap(Observable.fromIterable)
     }
 
     val coins = digger
-      .mapEval { treasure =>
+      .mapEvalF { treasure =>
         client.cash(treasure)
       }
-      .mapBatch(coins => Batch.fromSeq(coins))
+      .flatMap(Observable.fromIterable)
 
-    coins.sumL
+    TaskLift[F].apply(coins.sumL)
   }
 }
