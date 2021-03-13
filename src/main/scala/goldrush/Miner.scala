@@ -22,7 +22,7 @@ case class Miner[F[
         _ <- Concurrent[F].background {
           Observable
             .repeatEvalF(client.issueLicense())
-            .mapEvalF { license =>
+            .mapParallelUnorderedF(parallelism / 2) { license =>
               val licensesUses =
                 Seq.fill(license.digAllowed - license.digUsed)(license.id)
               queue.offerMany(licensesUses)
@@ -38,7 +38,7 @@ case class Miner[F[
       val coords = side.flatMap(x => side.flatMap(y => Observable.pure(x, y)))
 
       coords
-        .mapEvalF { case (x, y) =>
+        .mapParallelUnorderedF(parallelism * 2) { case (x, y) =>
           client.explore(Area(x, y, 1, 1))
         }
         .filter(_.amount > 0)
@@ -52,7 +52,7 @@ case class Miner[F[
         .fromResource(licensesR)
         .flatMap { licenses =>
           explorator
-            .mapEvalF { case (area, amount) =>
+            .mapParallelUnorderedF(parallelism) { case (area, amount) =>
               for {
                 foundTreasures <- Ref[F].of(Seq.empty[String])
                 _ <- area.locations.parTraverse { case (x, y) =>
@@ -79,11 +79,13 @@ case class Miner[F[
     }
 
     val coins = digger
-      .mapEvalF { treasure =>
+      .mapParallelUnorderedF(parallelism * 2) { treasure =>
         client.cash(treasure)
       }
       .flatMap(Observable.fromIterable)
 
     TaskLift[F].apply(coins.sumL)
   }
+
+  private val parallelism = 4
 }
