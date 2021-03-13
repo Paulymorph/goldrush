@@ -1,8 +1,11 @@
 package goldrush
 
+import cats.effect.concurrent.Ref
 import cats.effect.{Concurrent, ContextShift, Resource, Sync}
-import cats.syntax.applicative._
+import cats.syntax.flatMap._
 import cats.syntax.functor._
+import cats.syntax.applicative._
+import cats.syntax.parallel._
 import cats.{Applicative, Parallel}
 import monix.catnap.ConcurrentQueue
 import monix.tail.Iterant
@@ -39,32 +42,34 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
         }
         .filter(_.amount > 0)
         .map { result =>
-          (result.area.posX, result.area.posY, result.amount)
+          (result.area, result.amount)
         }
     }
 
     val digger = {
-      val seed = (1 -> Seq.empty[String]).pure[F]
-
       Iterant.fromResource(licensesR).flatMap { licenses =>
         explorator
-          .mapEval { case (x, y, amount) =>
-            licenses.foldWhileLeftEvalL(seed) {
-              case ((level, foundTreasures), license) =>
-                client.dig(license, x, y, level).map { newTreasures =>
-                  val nextTreasures = newTreasures ++ foundTreasures
-                  val result = level + 1 -> nextTreasures
-                  Either.cond(
+          .mapEval { case (area, amount) =>
+            for {
+              foundTreasures <- Ref[F].of(Seq.empty[String])
+              _ <- area.locations.parTraverse { case (x, y) =>
+                licenses.foldWhileLeftEvalL(1.pure) { case (level, license) =>
+                  for {
+                    newTreasures <- client.dig(license, x, y, level)
+                    nextTreasures <- foundTreasures
+                      .getAndUpdate(_ ++ newTreasures)
+                    result = level + 1
+                  } yield Either.cond(
                     level >= 10 || nextTreasures.size >= amount,
                     result,
                     result
                   )
                 }
-            }
+              }
+              result <- foundTreasures.get
+            } yield result
           }
-          .mapBatch { case (_, treasures) =>
-            Batch.fromSeq(treasures)
-          }
+          .mapBatch(a => Batch.fromSeq(a))
       }
     }
 
