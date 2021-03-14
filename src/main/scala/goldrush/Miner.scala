@@ -57,7 +57,7 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
                   for {
                     newTreasures <- client.dig(license, x, y, level)
                     nextTreasures <- foundTreasures
-                      .getAndUpdate(_ ++ newTreasures)
+                      .getAndUpdate(newTreasures ++ _)
                     result = level + 1
                   } yield Either.cond(
                     level >= 10 || nextTreasures.size >= amount,
