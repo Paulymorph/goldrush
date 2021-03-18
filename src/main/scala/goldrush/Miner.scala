@@ -57,7 +57,7 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
                     newTreasures <- client.dig(license, x, y, level)
                     nextTreasures <- foundTreasures
                       .getAndUpdate(_ ++ newTreasures)
-                    goDeeper = level >= 10 || nextTreasures.size >= amount
+                    goDeeper = level < 10 && nextTreasures.size < amount
                     _ <- if (goDeeper) dig(level + 1) else Applicative[F].unit
                   } yield ()
                 }
