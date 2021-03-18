@@ -1,32 +1,32 @@
 package goldrush
 
-import cats.effect.concurrent.Ref
+import cats.effect.concurrent.{MVar, Ref}
 import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.syntax.parallel._
+import cats.syntax.traverse._
 import cats.{Applicative, Parallel}
-import monix.catnap.ConcurrentQueue
 
 case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
     client: Client[F]
 ) {
   def mine: F[Int] = {
-    val licensesR: Resource[F, fs2.Stream[F, Int]] = {
+    val licensesR: Resource[F, F[Int]] = {
       for {
-        queue <- Resource.liftF(ConcurrentQueue.bounded[F, Int](3))
+        queue <- Resource.liftF(MVar.empty[F, Int])
         _ <- Concurrent[F].background {
           fs2.Stream
             .repeatEval(client.issueLicense())
             .evalMap { license =>
               val licensesUses =
                 Seq.fill(license.digAllowed - license.digUsed)(license.id)
-              queue.offerMany(licensesUses)
+              licensesUses.traverse(queue.put)
             }
             .compile
             .drain
         }
-      } yield fs2.Stream.repeatEval(queue.poll)
+      } yield queue.take
     }
 
     val explorator = {
@@ -45,7 +45,7 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
     }
 
     val digger = {
-      fs2.Stream.resource(licensesR).flatMap { licenses =>
+      fs2.Stream.resource(licensesR).flatMap { nextLicense =>
         explorator
           .evalMap { case (area, amount) =>
             for {
@@ -53,7 +53,7 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
               _ <- area.locations.parTraverse { case (x, y) =>
                 def dig(level: Int): F[Unit] = {
                   for {
-                    license <- licenses.head.compile.lastOrError
+                    license <- nextLicense
                     newTreasures <- client.dig(license, x, y, level)
                     nextTreasures <- foundTreasures
                       .getAndUpdate(_ ++ newTreasures)
