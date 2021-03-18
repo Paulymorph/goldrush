@@ -7,9 +7,7 @@ scalaVersion := "2.13.4"
 val monix = "3.3.0"
 libraryDependencies ++=
   Seq(
-    "io.monix" %% "monix",
-    "io.monix" %% "monix-tail",
-    "io.monix" %% "monix-reactive"
+    "io.monix" %% "monix"
   ).map(_ % monix)
 
 val sttp = "3.1.3"
@@ -34,6 +32,9 @@ libraryDependencies += "org.typelevel" %% "log4cats-slf4j" % log4cats
 
 val logging = "1.7.30"
 libraryDependencies += "org.slf4j" % "slf4j-simple" % logging
+
+val fs2 = "2.5.0"
+libraryDependencies += "co.fs2" %% "fs2-core" % fs2
 
 assemblyMergeStrategy in assembly := {
   case PathList("META-INF", _) => MergeStrategy.discard
