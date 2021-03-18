@@ -31,13 +31,12 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
 
     val explorator = {
       val sideSize = 3500
-      val step = 1
-      val side = fs2.Stream.range(0, sideSize, step)
+      val side = fs2.Stream(0 until sideSize: _*)
       val coords = side.flatMap(x => side.flatMap(y => fs2.Stream(x -> y)))
 
       coords
-        .parEvalMap[F, ExploreResponse](8) { case (x, y) =>
-          client.explore(Area(x, y, step, step))
+        .evalMap { case (x, y) =>
+          client.explore(Area(x, y, 1, 1))
         }
         .filter(_.amount > 0)
         .map { result =>
@@ -48,7 +47,7 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
     val digger = {
       fs2.Stream.resource(licensesR).flatMap { nextLicense =>
         explorator
-          .parEvalMap(4) { case (area, amount) =>
+          .evalMap { case (area, amount) =>
             for {
               foundTreasures <- Ref[F].of(Seq.empty[String])
               _ <- area.locations.parTraverse { case (x, y) =>
@@ -73,7 +72,7 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
     }
 
     val coins = digger
-      .parEvalMap(8) { treasure =>
+      .evalMap { treasure =>
         client.cash(treasure)
       }
       .flatMap(fs2.Stream.emits)
