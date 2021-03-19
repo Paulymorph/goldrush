@@ -39,7 +39,7 @@ case class Miner[F[
       val coords = side.flatMap(x => side.flatMap(y => Observable.pure(x, y)))
 
       coords
-        .mapParallelUnorderedF(digParallelism) { case (x, y) =>
+        .mapParallelUnorderedF(digParallelism / 4) { case (x, y) =>
           client.explore(
             Area(
               x,
@@ -56,7 +56,7 @@ case class Miner[F[
         .flatMapIterable { case (area, _) =>
           area.locations
         }
-        .mapParallelUnorderedF(digParallelism) { case (x, y) =>
+        .mapParallelUnorderedF(digParallelism / 2) { case (x, y) =>
           client.explore(Area(x, y, 1, 1))
         }
         .filter(_.amount > 0)
