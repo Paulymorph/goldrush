@@ -14,13 +14,15 @@ case class Miner[F[
     client: Client[F]
 ) {
   def mine: F[Int] = {
+    val digParallelism = 16
+
     val licensesR: Resource[F, F[Int]] = {
       for {
         queue <- Resource.liftF(MVar.empty[F, Int])
         _ <- Concurrent[F].background {
           Observable
             .repeat(())
-            .mapParallelUnorderedF(8)(_ => client.issueLicense())
+            .mapParallelUnorderedF(digParallelism)(_ => client.issueLicense())
             .flatMapIterable { license =>
               Seq.fill(license.digAllowed - license.digUsed)(license.id)
             }
@@ -68,7 +70,7 @@ case class Miner[F[
         .fromResource(licensesR)
         .flatMap { nextLicense =>
           explorator
-            .mapParallelUnorderedF(8) { case (x, y, amount) =>
+            .mapParallelUnorderedF(digParallelism) { case (x, y, amount) =>
               def dig(
                   level: Int,
                   foundTreasures: Seq[String]
