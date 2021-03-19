@@ -1,12 +1,10 @@
 package goldrush
 
-import cats.effect.concurrent.{MVar, Ref}
+import cats.effect.concurrent.MVar
 import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
-import cats.syntax.parallel._
 import cats.{Applicative, Parallel}
-import monix.catnap.ConcurrentQueue
 import monix.eval.{TaskLift, TaskLike}
 import monix.reactive.Observable
 
@@ -21,7 +19,8 @@ case class Miner[F[
         queue <- Resource.liftF(MVar.empty[F, Int])
         _ <- Concurrent[F].background {
           Observable
-            .repeatEvalF(client.issueLicense())
+            .repeat(())
+            .mapParallelUnorderedF(4)(_ => client.issueLicense())
             .flatMapIterable { license =>
               Seq.fill(license.digAllowed - license.digUsed)(license.id)
             }
@@ -38,7 +37,7 @@ case class Miner[F[
       val coords = side.flatMap(x => side.flatMap(y => Observable.pure(x, y)))
 
       coords
-        .mapEvalF { case (x, y) =>
+        .mapParallelUnorderedF(4) { case (x, y) =>
           client.explore(
             Area(
               x,
@@ -55,7 +54,7 @@ case class Miner[F[
         .flatMapIterable { case (area, _) =>
           area.locations
         }
-        .mapEvalF { case (x, y) =>
+        .mapParallelUnorderedF(8) { case (x, y) =>
           client.explore(Area(x, y, 1, 1))
         }
         .filter(_.amount > 0)
@@ -69,7 +68,7 @@ case class Miner[F[
         .fromResource(licensesR)
         .flatMap { nextLicense =>
           explorator
-            .mapEvalF { case (x, y, amount) =>
+            .mapParallelUnorderedF(4) { case (x, y, amount) =>
               def dig(
                   level: Int,
                   foundTreasures: Seq[String]
@@ -93,7 +92,7 @@ case class Miner[F[
     }
 
     val coins = digger
-      .mapEvalF { treasure =>
+      .mapParallelUnorderedF(8) { treasure =>
         client.cash(treasure)
       }
       .flatMap(Observable.fromIterable)
