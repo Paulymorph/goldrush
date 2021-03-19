@@ -7,6 +7,7 @@ import cats.syntax.functor._
 import cats.syntax.parallel._
 import cats.syntax.traverse._
 import cats.{Applicative, Parallel}
+import fs2.Chunk
 
 case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
     client: Client[F]
@@ -31,11 +32,32 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
 
     val explorator = {
       val sideSize = 3500
-      val side = fs2.Stream(0 until sideSize: _*)
+      val step = 3
+      val side = fs2.Stream.range(0, sideSize, step)
       val coords = side.flatMap(x => side.flatMap(y => fs2.Stream(x -> y)))
 
       coords
-        .evalMap { case (x, y) =>
+        .parEvalMapUnordered[F, ExploreResponse](8) { case (x, y) =>
+          client.explore(
+            Area(
+              x,
+              y,
+              Math.min(step, sideSize - x),
+              Math.min(step, sideSize - y)
+            )
+          )
+        }
+        .filter(_.amount > 0)
+        .map { result =>
+          (result.area, result.amount)
+        }
+        .buffer(16)
+        .mapChunks { c =>
+          val reorder = c.toVector.sortBy(_._2)
+          Chunk.vector(reorder)
+        }
+        .flatMap { case (area, _) => fs2.Stream.emits(area.locations) }
+        .parEvalMapUnordered(8) { case (x, y) =>
           client.explore(Area(x, y, 1, 1))
         }
         .filter(_.amount > 0)
