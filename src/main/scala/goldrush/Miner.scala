@@ -5,11 +5,14 @@ import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.syntax.parallel._
-import cats.syntax.traverse._
 import cats.{Applicative, Parallel}
-import fs2.Chunk
+import monix.catnap.ConcurrentQueue
+import monix.eval.{TaskLift, TaskLike}
+import monix.reactive.Observable
 
-case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
+case class Miner[F[
+    _
+]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
     client: Client[F]
 ) {
   def mine: F[Int] = {
@@ -17,15 +20,13 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
       for {
         queue <- Resource.liftF(MVar.empty[F, Int])
         _ <- Concurrent[F].background {
-          fs2.Stream
-            .repeatEval(client.issueLicense())
-            .evalMap { license =>
-              val licensesUses =
-                Seq.fill(license.digAllowed - license.digUsed)(license.id)
-              licensesUses.traverse(queue.put)
+          Observable
+            .repeatEvalF(client.issueLicense())
+            .flatMapIterable { license =>
+              Seq.fill(license.digAllowed - license.digUsed)(license.id)
             }
-            .compile
-            .drain
+            .mapEvalF(queue.put)
+            .completedF[F]
         }
       } yield queue.take
     }
@@ -33,11 +34,11 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
     val explorator = {
       val sideSize = 3500
       val step = 3
-      val side = fs2.Stream.range(0, sideSize, step)
-      val coords = side.flatMap(x => side.flatMap(y => fs2.Stream(x -> y)))
+      val side = Observable.range(0, sideSize, step).map(_.toInt)
+      val coords = side.flatMap(x => side.flatMap(y => Observable.pure(x, y)))
 
       coords
-        .parEvalMapUnordered[F, ExploreResponse](8) { case (x, y) =>
+        .mapEvalF { case (x, y) =>
           client.explore(
             Area(
               x,
@@ -51,54 +52,52 @@ case class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift](
         .map { result =>
           (result.area, result.amount)
         }
-        .buffer(16)
-        .mapChunks { c =>
-          val reorder = c.toVector.sortBy(_._2)
-          Chunk.vector(reorder)
+        .flatMapIterable { case (area, _) =>
+          area.locations
         }
-        .flatMap { case (area, _) => fs2.Stream.emits(area.locations) }
-        .parEvalMapUnordered(8) { case (x, y) =>
+        .mapEvalF { case (x, y) =>
           client.explore(Area(x, y, 1, 1))
         }
         .filter(_.amount > 0)
         .map { result =>
-          (result.area, result.amount)
+          (result.area.posX, result.area.posY, result.amount)
         }
     }
 
     val digger = {
-      fs2.Stream.resource(licensesR).flatMap { nextLicense =>
-        explorator
-          .evalMap { case (area, amount) =>
-            for {
-              foundTreasures <- Ref[F].of(Seq.empty[String])
-              _ <- area.locations.parTraverse { case (x, y) =>
-                def dig(level: Int): F[Unit] = {
-                  for {
-                    license <- nextLicense
-                    newTreasures <- client.dig(license, x, y, level)
-                    nextTreasures <- foundTreasures
-                      .getAndUpdate(_ ++ newTreasures)
-                    goDeeper = level < 10 && nextTreasures.size < amount
-                    _ <- if (goDeeper) dig(level + 1) else Applicative[F].unit
-                  } yield ()
-                }
-
-                dig(1)
+      Observable
+        .fromResource(licensesR)
+        .flatMap { nextLicense =>
+          explorator
+            .mapEvalF { case (x, y, amount) =>
+              def dig(
+                  level: Int,
+                  foundTreasures: Seq[String]
+              ): F[Seq[String]] = {
+                for {
+                  license <- nextLicense
+                  newTreasures <- client.dig(license, x, y, level)
+                  nextTreasures = foundTreasures ++ newTreasures
+                  goDeeper = level < 10 && nextTreasures.size < amount
+                  result <-
+                    if (goDeeper)
+                      dig(level + 1, nextTreasures)
+                    else Applicative[F].pure(nextTreasures)
+                } yield result
               }
-              result <- foundTreasures.get
-            } yield result
-          }
-          .flatMap(fs2.Stream.emits)
-      }
+
+              dig(1, Seq.empty)
+            }
+        }
+        .flatMap(Observable.fromIterable)
     }
 
     val coins = digger
-      .evalMap { treasure =>
+      .mapEvalF { treasure =>
         client.cash(treasure)
       }
-      .flatMap(fs2.Stream.emits)
+      .flatMap(Observable.fromIterable)
 
-    coins.compile.foldMonoid
+    TaskLift[F].apply(coins.sumL)
   }
 }
