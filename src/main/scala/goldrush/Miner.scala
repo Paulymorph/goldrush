@@ -20,7 +20,7 @@ case class Miner[F[
         _ <- Concurrent[F].background {
           Observable
             .repeat(())
-            .mapParallelUnorderedF(4)(_ => client.issueLicense())
+            .mapParallelUnorderedF(8)(_ => client.issueLicense())
             .flatMapIterable { license =>
               Seq.fill(license.digAllowed - license.digUsed)(license.id)
             }
@@ -68,7 +68,7 @@ case class Miner[F[
         .fromResource(licensesR)
         .flatMap { nextLicense =>
           explorator
-            .mapParallelUnorderedF(4) { case (x, y, amount) =>
+            .mapParallelUnorderedF(8) { case (x, y, amount) =>
               def dig(
                   level: Int,
                   foundTreasures: Seq[String]
