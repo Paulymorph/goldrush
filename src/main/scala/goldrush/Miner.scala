@@ -5,8 +5,9 @@ import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.{Applicative, Parallel}
+import goldrush.Miner.Explorator
 import monix.eval.{TaskLift, TaskLike}
-import monix.reactive.Observable
+import monix.reactive.{Observable, OverflowStrategy}
 
 case class Miner[F[
     _
@@ -20,6 +21,8 @@ case class Miner[F[
       for {
         queue <- Resource.liftF(MVar.empty[F, Int])
         _ <- Concurrent[F].background {
+          implicit val overflowStrategy: OverflowStrategy[License] =
+            OverflowStrategy.BackPressure(2)
           Observable
             .repeat(())
             .mapParallelUnorderedF(digParallelism)(_ => client.issueLicense())
@@ -32,7 +35,7 @@ case class Miner[F[
       } yield queue.take
     }
 
-    val explorator = {
+    val explorator: Explorator = {
       val sideSize = 3500
       val step = 4
       val side = Observable.range(0, sideSize, step).map(_.toInt)
@@ -101,4 +104,11 @@ case class Miner[F[
 
     TaskLift[F].apply(coins.sumL)
   }
+}
+
+object Miner {
+  type X = Int
+  type Y = Int
+  type Amount = Int
+  type Explorator = Observable[(X, Y, Amount)]
 }
