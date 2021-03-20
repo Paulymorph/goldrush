@@ -5,9 +5,10 @@ import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.{Applicative, Parallel}
-import goldrush.Miner.Explorator
+import goldrush.Miner._
 import monix.eval.{TaskLift, TaskLike}
 import monix.reactive.{Observable, OverflowStrategy}
+import Math.min
 
 case class Miner[F[
     _
@@ -33,44 +34,11 @@ case class Miner[F[
       } yield queue.take
     }
 
-    val explorator: Explorator = {
-      val sideSize = 3500
-      val step = 4
-      val side = Observable.range(0, sideSize, step).map(_.toInt)
-      val coords = side.flatMap(x => side.flatMap(y => Observable.pure(x, y)))
-
-      coords
-        .mapParallelUnorderedF(digParallelism / 4) { case (x, y) =>
-          client.explore(
-            Area(
-              x,
-              y,
-              Math.min(step, sideSize - x),
-              Math.min(step, sideSize - y)
-            )
-          )
-        }
-        .filter(_.amount > 0)
-        .map { result =>
-          (result.area, result.amount)
-        }
-        .flatMapIterable { case (area, _) =>
-          area.locations
-        }
-        .mapParallelUnorderedF(digParallelism / 2) { case (x, y) =>
-          client.explore(Area(x, y, 1, 1))
-        }
-        .filter(_.amount > 0)
-        .map { result =>
-          (result.area.posX, result.area.posY, result.amount)
-        }
-    }
-
     val digger = {
       Observable
         .fromResource(licensesR)
         .flatMap { nextLicense =>
-          explorator
+          explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
             .mapParallelUnorderedF(digParallelism) { case (x, y, amount) =>
               def dig(
                   level: Int,
@@ -109,4 +77,37 @@ object Miner {
   type Y = Int
   type Amount = Int
   type Explorator = Observable[(X, Y, Amount)]
+
+  def explorator[F[_]: TaskLike](
+      explore: Area => F[ExploreResponse]
+  )(area: Area, amount: Int): Explorator = {
+    val Area(x, y, sizeX, sizeY) = area
+    if (sizeX * sizeY == 1)
+      Observable((x, y, amount))
+    else {
+      val subAreas =
+        if (sizeX > sizeY) {
+          val step = sizeX / 2
+          val untilX = x + sizeX
+          Observable
+            .range(x, untilX, step)
+            .map(_.toInt)
+            .map(newX => Area(newX, y, min(step, untilX - newX), sizeY))
+        } else {
+          val step = sizeY / 2
+          val untilY = y + sizeY
+          Observable
+            .range(y, untilY, step)
+            .map(_.toInt)
+            .map(newY => Area(x, newY, sizeX, min(step, untilY - newY)))
+        }
+
+      subAreas
+        .mapEvalF(explore)
+        .filter(_.amount > 0)
+        .mergeMap { exploreResult =>
+          explorator(explore)(exploreResult.area, exploreResult.amount)
+        }
+    }
+  }
 }
