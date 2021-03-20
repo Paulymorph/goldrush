@@ -1,4 +1,4 @@
-package goldrush
+package goldrush.client_checks
 
 import cats.effect.{Concurrent, ContextShift, Sync, Timer}
 import cats.instances.seq._
@@ -6,6 +6,7 @@ import cats.syntax.applicativeError._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.{Applicative, FlatMap, MonadError, Parallel, Traverse}
+import goldrush.{Area, Client, ExploreResponse}
 import monix.eval.{TaskLift, TaskLike}
 
 import scala.concurrent.duration.MILLISECONDS

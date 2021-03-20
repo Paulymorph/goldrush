@@ -1,13 +1,10 @@
-package goldrush
+package goldrush.client_checks
 
-import java.util.concurrent.ScheduledExecutorService
-
-import cats.{Applicative, ApplicativeError, FlatMap}
-import cats.effect.{Clock, IO, Timer}
+import cats.effect.Timer
 import cats.syntax.flatMap._
-import cats.syntax.functor._
+import cats.{Applicative, ApplicativeError, FlatMap}
+import goldrush._
 
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.{FiniteDuration, MILLISECONDS}
 import scala.util.Random
 
