@@ -184,10 +184,36 @@ object Miner {
     }
   }
 
+  def exploratorBatchedNew[F[_]: TaskLike: Applicative](maxStep: Int = 5)(
+      explore: Area => F[ExploreResponse]
+  )(area: Area, amount: Int): Explorator = {
+    import area._
+    val xs = Observable.range(posX, posX + sizeX, maxStep).map(_.toInt)
+    val ys = Observable.range(posY, posY + sizeY, maxStep).map(_.toInt)
+    val coords = xs.flatMap(x => ys.flatMap(y => Observable.pure(x, y)))
+
+    coords
+      .mapParallelUnorderedF(4) { case (x, y) =>
+        explore(
+          Area(
+            x,
+            y,
+            Math.min(maxStep, posX + sizeX - x),
+            Math.min(maxStep, posY + sizeY - y)
+          )
+        )
+      }
+      .filter(_.amount > 0)
+      .flatMap { response =>
+        exploratorBinary(explore)(response.area, response.amount)
+      }
+
+  }
+
   def explorator[F[_]: TaskLike: Applicative](
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
-    exploratorBatched(50)(explore)(area, amount)
+    exploratorBatchedNew(5)(explore)(area, amount)
   }
 
 }

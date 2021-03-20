@@ -59,14 +59,16 @@ class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
   it should "explore only the places with treasures2" in {
     println(s"size of field: $sss")
 
-    val methods: Seq[(String, (Area => Coeval[ExploreResponse]) => (Area, Int) => Explorator)] = Seq(
-      "exploratorBatched1" -> Miner.exploratorBatched[Coeval](1),
-      "exploratorBatched2" -> Miner.exploratorBatched[Coeval](2),
-      "exploratorBatched5" -> Miner.exploratorBatched[Coeval](5),
-      "exploratorBatched13" -> Miner.exploratorBatched[Coeval](13),
-      "exploratorBatched30" -> Miner.exploratorBatched[Coeval](30),
-      "exploratorBatched100" -> Miner.exploratorBatched[Coeval](100),
-      "exploratorBatched1000" -> Miner.exploratorBatched[Coeval](1000),
+    val batches: Seq[(String, (Area => Coeval[ExploreResponse]) => (Area, Int) => Explorator)] =
+      Seq(1, 2, 4, 5, 8, 13, 30, 100, 1000).flatMap(maxStep =>
+        Seq(
+          s"exploratorBatched$maxStep" -> Miner.exploratorBatched[Coeval](maxStep),
+          s"exploratorBatchedNew$maxStep" -> Miner.exploratorBatchedNew[Coeval](maxStep)
+        )
+      )
+    val methods: Seq[
+      (String, (Area => Coeval[ExploreResponse]) => (Area, Int) => Explorator)
+    ] = batches ++ Seq(
       "exploratorBinary" -> Miner.exploratorBinary[Coeval],
       "exploratorBy3" -> Miner.exploratorBy3[Coeval]
     )
@@ -97,9 +99,9 @@ class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
           }
         }
 
-        val foundPositions = exploreMethod(explore)(area, treasures(area))
-          .toListL
-          .runSyncUnsafe()
+        val foundPositions =
+          exploreMethod(explore)(area, treasures(area)).toListL
+            .runSyncUnsafe()
 
         println(
           s"${String.format("%30s", methodName)}, frequency $frequency, calls: ${callsCounter.get()}, " +
