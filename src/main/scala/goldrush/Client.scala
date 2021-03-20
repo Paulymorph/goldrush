@@ -125,32 +125,13 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
     import cats.syntax.monadError._
     import retry.syntax.all._
 
-    def context(retry: RetryDetails) = Map(
-      "time" -> retry.retriesSoFar.toString,
-      "operation" -> operation,
-      "cumulativeDelay" -> retry.cumulativeDelay.toString
-    )
-
     request
       .map(_.body)
-      .retryingOnFailuresAndAllErrors(
-        _.isRight,
-        infPolicy,
-        (error, retry) => {
-          error match {
-            case Left(HttpError(_, StatusCode.BadGateway)) | Right(_) =>
-              Applicative[F].unit
-            case Left(error) =>
-              StructuredLogger[F]
-                .warn(context(retry), error)(s"Retrying $operation")
-          }
-        },
-        (error, retry) => {
-          StructuredLogger[F]
-            .error(context(retry), error)(s"Retrying $operation")
-        }
-      )
       .rethrow
+      .retryingOnAllErrors(
+        infPolicy,
+        retry.noop
+      )
   }
 }
 
