@@ -154,12 +154,11 @@ object Miner {
     }
   }
 
-  def exploratorBatched[F[_]: TaskLike: Applicative](
+  def exploratorBatched[F[_]: TaskLike: Applicative](maxStep: Int = 5)(
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
     if (amount < 1) Observable.empty
     else {
-      val maxStep = 50
       val Area(x, y, sizeX, sizeY) = area
       val subAreas = if (sizeX > sizeY) {
         val xUntil = x + sizeX
@@ -179,7 +178,7 @@ object Miner {
         .mapParallelUnorderedF(4)(area => explore(area).map(area -> _.amount))
         .flatMap { case (area, amount) =>
           if (maxStep < sizeX || maxStep < sizeY)
-            exploratorBatched(explore)(area, amount)
+            exploratorBatched(maxStep)(explore)(area, amount)
           else exploratorBinary(explore)(area, amount)
         }
     }
@@ -188,7 +187,7 @@ object Miner {
   def explorator[F[_]: TaskLike: Applicative](
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
-    exploratorBatched(explore)(area, amount)
+    exploratorBatched(50)(explore)(area, amount)
   }
 
 }

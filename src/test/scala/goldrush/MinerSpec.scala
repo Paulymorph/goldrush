@@ -16,7 +16,7 @@ class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
   override def afterAll() = {
     s.shutdown()
   }
-  val sss = 500
+  val sss = 100
   val area = Area(0, 0, sss, sss)
   private val locations: Seq[(Int, Int)] = area.locations
 
@@ -60,7 +60,13 @@ class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
     println(s"size of field: $sss")
 
     val methods: Seq[(String, (Area => Coeval[ExploreResponse]) => (Area, Int) => Explorator)] = Seq(
-      "exploratorBatched" -> Miner.exploratorBatched[Coeval],
+      "exploratorBatched1" -> Miner.exploratorBatched[Coeval](1),
+      "exploratorBatched2" -> Miner.exploratorBatched[Coeval](2),
+      "exploratorBatched5" -> Miner.exploratorBatched[Coeval](5),
+      "exploratorBatched13" -> Miner.exploratorBatched[Coeval](13),
+      "exploratorBatched30" -> Miner.exploratorBatched[Coeval](30),
+      "exploratorBatched100" -> Miner.exploratorBatched[Coeval](100),
+      "exploratorBatched1000" -> Miner.exploratorBatched[Coeval](1000),
       "exploratorBinary" -> Miner.exploratorBinary[Coeval],
       "exploratorBy3" -> Miner.exploratorBy3[Coeval]
     )
@@ -96,7 +102,7 @@ class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
           .runSyncUnsafe()
 
         println(
-          s"$methodName, frequency $frequency, calls: ${callsCounter.get()}, " +
+          s"${String.format("%30s", methodName)}, frequency $frequency, calls: ${callsCounter.get()}, " +
             s"locationSizes: ${locationSizes}"
         )
 
