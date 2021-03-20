@@ -1,11 +1,9 @@
 package goldrush.client_checks
 
 import cats.effect.Timer
-import cats.syntax.flatMap._
 import cats.{Applicative, ApplicativeError, FlatMap}
 import goldrush._
 
-import scala.concurrent.duration.{FiniteDuration, MILLISECONDS}
 import scala.util.Random
 
 class FakeClient[F[_]: Applicative: FlatMap: Timer](implicit
@@ -15,39 +13,33 @@ class FakeClient[F[_]: Applicative: FlatMap: Timer](implicit
 
   override def listLicenses(): F[Seq[License]] = ???
 
-  override def issueLicense(coins: Int*): F[License] = ???
+  override def issueLicense(coins: Int*): F[License] = {
+    fakeWaitAndResponse(
+      License(Random.nextInt(), Math.max(3, coins.size * 5), 0),
+      15,
+      Math.max(1, 10 - coins.sum)
+    )
+  }
 
   override def explore(area: Area): F[ExploreResponse] = {
     val areaSize = area.sizeX * area.sizeY
 
-    if (Random.nextInt(5) == 0) {
-      Timer[F]
-        .sleep(FiniteDuration(Random.nextInt(areaSize / 5 + 1), MILLISECONDS))
-        .flatMap(_ =>
-          ApplicativeError[F, Throwable].fromEither(Left(new RuntimeException))
-        )
-    } else {
-      Timer[F]
-        .sleep(FiniteDuration(Random.nextInt(areaSize / 10 + 1), MILLISECONDS))
-        .flatMap(_ =>
-          Applicative[F].pure {
-            ExploreResponse(area, Random.nextInt(115))
-          }
-        )
-    }
-
+    fakeWaitAndResponse(
+      ExploreResponse(area, Random.nextInt(115)),
+      areaSize / 5 + 1,
+      areaSize / 10 + 1
+    )
   }
 
-//  def sleep(timespan: FiniteDuration): IO[Unit] =
-//    IO.cancelable { cb =>
-//      val tick = new Runnable {
-//        def run() = ec.execute(new Runnable {
-//          def run() = cb(Right(()))
-//        })
-//      }
-//      val f = sc.schedule(tick, timespan.length, timespan.unit)
-//      IO(f.cancel(false)).void
-//    }
+  private def fakeWaitAndResponse[T](
+      res: => T,
+      errorLatency: Int,
+      successLatency: Int
+  ): F[T] = {
+    if (Random.nextInt(5) == 0)
+      CatsUtil.sleepAndReturn(errorLatency, Left(new RuntimeException))
+    else CatsUtil.sleepAndReturn(successLatency, Right(res))
+  }
 
   override def dig(
       licenseId: Int,
