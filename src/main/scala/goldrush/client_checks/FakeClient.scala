@@ -16,8 +16,8 @@ class FakeClient[F[_]: Applicative: FlatMap: Timer](implicit
   override def issueLicense(coins: Int*): F[License] = {
     fakeWaitAndResponse(
       License(Random.nextInt(), Math.max(3, coins.size * 5), 0),
-      15,
-      Math.max(1, 10 - coins.sum)
+      30,
+      Math.max(1, 20)
     )
   }
 

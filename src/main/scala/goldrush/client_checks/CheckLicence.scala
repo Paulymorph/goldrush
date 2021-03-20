@@ -11,11 +11,9 @@ case class CheckLicence[F[_]: ThrowableMonadError: Timer: TaskLift: TaskLike](
 ) extends MethodChecker[F, Int, License](client) {
 
   override val dataName: String = "threadsCount"
-  override val input: Seq[Int] = Seq(1, 2, 3, 4, 5, 8)
+  override val input: Seq[Int] = Seq(1, 2, 3, 4, 5, 8, 16, 32)
 
-  override def checkMethod(
-      input: Int
-  ): F[Seq[(Long, Either[Throwable, License])]] = {
+  override def checkMethod(input: Int): F[Seq[Data[License]]] = {
     val request = Observable
       .range(0, 1000)
       .mapParallelUnorderedF(input)(_ => timed(_.issueLicense()))

@@ -15,45 +15,54 @@ abstract class MethodChecker[F[_]: ThrowableMonadError: Timer, Inp, Out](
 
   def timeNow: F[Long] = Timer[F].clock.realTime(MILLISECONDS)
 
+  case class Data[T](begin: Long, ends: Long, result: Either[Throwable, T]) {
+    lazy val duration = ends - begin
+  }
+
   val dataName: String
 
   val input: Seq[Inp]
 
-  def checkMethod(input: Inp): F[Seq[(Long, Either[Throwable, Out])]]
+  def checkMethod(input: Inp): F[Seq[Data[Out]]]
 
   def timed[T](
       f: Client[F] => F[T]
-  ): F[(Long, Either[Throwable, T])] = {
+  ): F[Data[T]] = {
     for {
       begin <- timeNow
       res <- f(client).attempt
       end <- timeNow
-    } yield (end - begin, res)
+    } yield Data(begin, end, res)
 
   }
 
-  private def printTimings(name: String, times: Seq[Long]): Unit = {
-    if (times.isEmpty) ()
+  private def printTimings(name: String, data: Seq[Data[_]]): Unit = {
+    if (data.isEmpty) ()
     else {
-      val srt = times.sorted
+      val rps =
+        data.map(_.ends).map(_ / 1e3.toInt).groupBy(identity).values.map(_.size)
+      val durations = data.map(_.duration)
+      val timeSpentToTest = (data.map(_.ends).max - data.map(_.begin).min) / 1e3
+      val srt = durations.sorted
       val n = srt.size
       val qs = Seq(10, 50, 90, 95, 99)
         .map(i => s"q$i: ${srt(i * n / 100)}")
         .mkString(", ")
-      println(s"$name, count: $n. min: ${srt.head}, ${qs}, max: ${srt.last}")
+      println(
+        s"$name, count: $n, rps: ${rps.sum / rps.size}, rps2: ${(data.size / timeSpentToTest).toInt} min: ${srt.head}, ${qs}, max: ${srt.last}"
+      )
     }
   }
 
   private def printData[T](
       dataInfo: String,
-      data: Seq[(Long, Either[Throwable, T])]
+      data: Seq[Data[Out]]
   ): Unit = {
-    val fails = data.collect { case (t, Left(l)) => (t, l) }
-    val successes = data.collect { case (t, Right(r)) => (t, r) }
+    val (fails, successes) = data.partition(_.result.isLeft)
 
     println(dataInfo)
-    printTimings("fails", fails.map(_._1))
-    printTimings("successes", successes.map(_._1))
+    printTimings("fails", fails)
+    printTimings("successes", successes)
     println("\n")
   }
 

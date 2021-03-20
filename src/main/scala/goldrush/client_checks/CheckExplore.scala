@@ -6,7 +6,7 @@ import cats.instances.seq._
 import goldrush.Types.ThrowableMonadError
 import goldrush.{Area, Client, ExploreResponse}
 
-class CheckExploreTimings[F[_]: ThrowableMonadError: Timer](client: Client[F])
+class CheckExplore[F[_]: ThrowableMonadError: Timer](client: Client[F])
     extends MethodChecker[F, Int, ExploreResponse](client) {
 
   override val dataName: String = "areaSize"
@@ -17,9 +17,7 @@ class CheckExploreTimings[F[_]: ThrowableMonadError: Timer](client: Client[F])
     j <- Range(0, 10)
   } yield Area(i * size, j * size, size, size)
 
-  override def checkMethod(
-      input: Int
-  ): F[Seq[(Long, Either[Throwable, ExploreResponse])]] = {
+  override def checkMethod(input: Int): F[Seq[Data[ExploreResponse]]] = {
     val areas = genAreas(input)
     Traverse[Seq].traverse(areas)(ar => timed(_.explore(ar)))
   }
