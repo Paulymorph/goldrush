@@ -77,42 +77,6 @@ object Miner {
   type Amount = Int
   type Explorator = Observable[(X, Y, Amount)]
 
-  def exploratorBy3[F[_]: TaskLike](
-      explore: Area => F[ExploreResponse]
-  )(area: Area, amount: Int): Explorator = {
-    val digParallelism = 8
-    val sideSize = area.sizeX
-    val step = 4
-    val side = Observable.range(0, sideSize, step).map(_.toInt)
-    val coords = side.flatMap(x => side.flatMap(y => Observable.pure(x, y)))
-
-    coords
-      .mapParallelUnorderedF(digParallelism / 4) { case (x, y) =>
-        explore(
-          Area(
-            x,
-            y,
-            Math.min(step, sideSize - x),
-            Math.min(step, sideSize - y)
-          )
-        )
-      }
-      .filter(_.amount > 0)
-      .map { result =>
-        (result.area, result.amount)
-      }
-      .flatMapIterable { case (area, _) =>
-        area.locations
-      }
-      .mapParallelUnorderedF(digParallelism / 2) { case (x, y) =>
-        explore(Area(x, y, 1, 1))
-      }
-      .filter(_.amount > 0)
-      .map { result =>
-        (result.area.posX, result.area.posY, result.amount)
-      }
-  }
-
   def exploratorBinary[F[_]: TaskLike](
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
@@ -157,36 +121,6 @@ object Miner {
   def exploratorBatched[F[_]: TaskLike: Applicative](maxStep: Int = 5)(
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
-    if (amount < 1) Observable.empty
-    else {
-      val Area(x, y, sizeX, sizeY) = area
-      val subAreas = if (sizeX > sizeY) {
-        val xUntil = x + sizeX
-        Observable
-          .range(x, xUntil, maxStep)
-          .map(_.toInt)
-          .map(i => Area(i, y, Math.min(maxStep, xUntil - i), sizeY))
-      } else {
-        val yUntil = y + sizeY
-        Observable
-          .range(y, yUntil, maxStep)
-          .map(_.toInt)
-          .map(i => Area(x, i, sizeX, Math.min(maxStep, yUntil - i)))
-      }
-
-      subAreas
-        .mapParallelUnorderedF(4)(area => explore(area).map(area -> _.amount))
-        .flatMap { case (area, amount) =>
-          if (maxStep < sizeX || maxStep < sizeY)
-            exploratorBatched(maxStep)(explore)(area, amount)
-          else exploratorBinary(explore)(area, amount)
-        }
-    }
-  }
-
-  def exploratorBatchedNew[F[_]: TaskLike: Applicative](maxStep: Int = 5)(
-      explore: Area => F[ExploreResponse]
-  )(area: Area, amount: Int): Explorator = {
     import area._
     val xs = Observable.range(posX, posX + sizeX, maxStep).map(_.toInt)
     val ys = Observable.range(posY, posY + sizeY, maxStep).map(_.toInt)
@@ -213,7 +147,7 @@ object Miner {
   def explorator[F[_]: TaskLike: Applicative](
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
-    exploratorBatchedNew(5)(explore)(area, amount)
+    exploratorBatched(5)(explore)(area, amount)
   }
 
 }

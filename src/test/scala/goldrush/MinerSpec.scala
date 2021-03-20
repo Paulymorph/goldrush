@@ -62,15 +62,13 @@ class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
     val batches: Seq[(String, (Area => Coeval[ExploreResponse]) => (Area, Int) => Explorator)] =
       Seq(1, 2, 4, 5, 8, 13, 30, 100, 1000).flatMap(maxStep =>
         Seq(
-          s"exploratorBatched$maxStep" -> Miner.exploratorBatched[Coeval](maxStep),
-          s"exploratorBatchedNew$maxStep" -> Miner.exploratorBatchedNew[Coeval](maxStep)
+          s"exploratorBatched$maxStep" -> Miner.exploratorBatched[Coeval](maxStep)
         )
       )
     val methods: Seq[
       (String, (Area => Coeval[ExploreResponse]) => (Area, Int) => Explorator)
     ] = batches ++ Seq(
-      "exploratorBinary" -> Miner.exploratorBinary[Coeval],
-      "exploratorBy3" -> Miner.exploratorBy3[Coeval]
+      "exploratorBinary" -> Miner.exploratorBinary[Coeval]
     )
 
     methods.map { case (methodName, exploreMethod) =>
