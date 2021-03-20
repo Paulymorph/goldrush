@@ -1,8 +1,7 @@
 package goldrush
 
-import java.util.concurrent.ConcurrentHashMap
-
 import cats.effect.{Concurrent, ContextShift, Sync, Timer}
+import cats.instances.seq._
 import cats.syntax.applicativeError._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
@@ -17,9 +16,7 @@ case class CheckExploreTimings[F[
     client: Client[F]
 )(implicit me: MonadError[F, Throwable]) {
 
-  val timings = new ConcurrentHashMap[Long, Long](16)
-
-  def timeNow = Timer[F].clock.realTime(MILLISECONDS)
+  def timeNow: F[Long] = Timer[F].clock.realTime(MILLISECONDS)
 
   def genAreas(size: Int): Seq[Area] = for {
     i <- Range(0, 10)
