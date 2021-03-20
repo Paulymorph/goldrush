@@ -84,36 +84,29 @@ object Miner {
     if (amount == 0 || sizeX * sizeY < 1) Observable.empty
     else if (sizeX * sizeY == 1) Observable((x, y, amount))
     else {
-      val subAreas =
+      val (left, right) =
         if (sizeX > sizeY) {
-          val centerX = sizeX / 2
-          (
-            Area(x, y, centerX, sizeY),
-            Area(x + centerX, y, sizeX - centerX, sizeY)
-          )
+          val step = sizeX / 2
+          val left = Area(x, y, step, sizeY)
+          val right = Area(x + step, y, sizeX - step, sizeY)
+          (left, right)
         } else {
-          val centerY = sizeY / 2
-          (
-            Area(x, y, sizeX, centerY),
-            Area(x, y + centerY, sizeX, sizeY - centerY)
-          )
+          val step = sizeY / 2
+          val left = Area(x, y, sizeX, step)
+          val right = Area(x, y + step, sizeX, sizeY - step)
+          (left, right)
         }
 
-      val firstExplore = explore(subAreas._1)
-      val nonEmptyAreas =
-        Observable
-          .from(firstExplore)
-          .flatMap { firstResponse =>
-            val secondAmount = amount - firstResponse.amount
-            Observable(
-              (firstResponse.area, firstResponse.amount),
-              (subAreas._2, secondAmount)
-            ).filter(_._2 > 0)
-          }
+      val exploreadAreas = Observable
+        .from(explore(left))
+        .flatMapIterable { explored =>
+          Seq(explored, ExploreResponse(right, amount - explored.amount))
+        }
 
-      nonEmptyAreas
-        .flatMap { case (area, amount) =>
-          exploratorBinary(explore)(area, amount)
+      exploreadAreas
+        .filter(_.amount > 0)
+        .flatMap { explored =>
+          exploratorBinary(explore)(explored.area, explored.amount)
         }
     }
   }

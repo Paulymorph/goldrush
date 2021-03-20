@@ -16,8 +16,8 @@ class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
   override def afterAll() = {
     s.shutdown()
   }
-  val sss = 100
-  val area = Area(0, 0, sss, sss)
+  val areaSide = 100
+  val area = Area(0, 0, areaSide, areaSide)
   private val locations: Seq[(Int, Int)] = area.locations
 
   "Explorator" should "explore all the treasures" in {
@@ -57,7 +57,7 @@ class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
   }
 
   it should "explore only the places with treasures2" in {
-    println(s"size of field: $sss")
+    println(s"size of field: $areaSide")
 
     val batches: Seq[(String, (Area => Coeval[ExploreResponse]) => (Area, Int) => Explorator)] =
       Seq(1, 2, 4, 5, 8, 13, 30, 100, 1000).flatMap(maxStep =>
@@ -74,7 +74,7 @@ class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
     methods.map { case (methodName, exploreMethod) =>
       Seq(25).map { frequency =>
         def containsTreasure(x: Int, y: Int): Boolean =
-          (x + y * sss) % frequency == 0
+          (x + y * areaSide) % frequency == 0
 
         def treasures(a: Area): Int = a.locations.map { case (x, y) =>
           if (containsTreasure(x, y)) 1
