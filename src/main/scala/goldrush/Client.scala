@@ -1,12 +1,12 @@
 package goldrush
 
 import cats.effect.Sync
-import cats.{Functor, MonadError}
+import cats.{Applicative, Functor, MonadError}
 import io.circe
 import io.circe.generic.auto._
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-import retry.{RetryPolicies, RetryPolicy, Sleep}
+import retry.{RetryDetails, RetryPolicies, RetryPolicy, Sleep}
 import sttp.client3.circe._
 import sttp.client3.{
   HttpError,
@@ -125,20 +125,32 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
     import cats.syntax.monadError._
     import retry.syntax.all._
 
+    def context(retry: RetryDetails) = Map(
+      "time" -> retry.retriesSoFar.toString,
+      "operation" -> operation,
+      "cumulativeDelay" -> retry.cumulativeDelay.toString
+    )
+
     request
       .map(_.body)
-      .rethrow
-      .retryingOnAllErrors(
+      .retryingOnFailuresAndAllErrors(
+        _.isRight,
         infPolicy,
         (error, retry) => {
-          val context = Map(
-            "time" -> retry.retriesSoFar.toString,
-            "operation" -> operation,
-            "cumulativeDelay" -> retry.cumulativeDelay.toString
-          )
-          StructuredLogger[F].warn(context, error)(s"Retrying $operation")
+          error match {
+            case Left(HttpError(_, StatusCode.BadGateway)) | Right(_) =>
+              Applicative[F].unit
+            case Left(error) =>
+              StructuredLogger[F]
+                .warn(context(retry), error)(s"Retrying $operation")
+          }
+        },
+        (error, retry) => {
+          StructuredLogger[F]
+            .error(context(retry), error)(s"Retrying $operation")
         }
       )
+      .rethrow
   }
 }
 
