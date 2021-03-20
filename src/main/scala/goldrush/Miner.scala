@@ -14,7 +14,7 @@ case class Miner[F[
     client: Client[F]
 ) {
   def mine: F[Int] = {
-    val digParallelism = 64
+    val digParallelism = 36
 
     val licensesR: Resource[F, F[Int]] = {
       for {
