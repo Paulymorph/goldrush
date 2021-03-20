@@ -34,7 +34,7 @@ case class Miner[F[
 
     val explorator = {
       val sideSize = 3500
-      val step = 5
+      val step = 4
       val side = Observable.range(0, sideSize, step).map(_.toInt)
       val coords = side.flatMap(x => side.flatMap(y => Observable.pure(x, y)))
 
