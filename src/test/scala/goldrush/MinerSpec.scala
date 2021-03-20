@@ -1,5 +1,9 @@
 package goldrush
 
+import java.util.concurrent.atomic.AtomicLong
+
+import cats.Id
+import goldrush.Miner.Explorator
 import monix.eval.Coeval
 import monix.execution.Scheduler
 import monix.execution.schedulers.SchedulerService
@@ -12,22 +16,22 @@ class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
   override def afterAll() = {
     s.shutdown()
   }
-  val area = Area(0, 0, 50, 50)
+  val sss = 500
+  val area = Area(0, 0, sss, sss)
   private val locations: Seq[(Int, Int)] = area.locations
 
   "Explorator" should "explore all the treasures" in {
     val explore: Area => Coeval[ExploreResponse] =
-      a => Coeval.pure(ExploreResponse(a, 1))
+      a => Coeval.pure(ExploreResponse(a, a.locations.size))
 
     val foundPositions = Miner
       .explorator(explore)(area, locations.size)
       .toListL
       .runSyncUnsafe()
 
-    foundPositions should contain theSameElementsAs locations.map {
-      case (x, y) =>
-        (x, y, 1)
-    }
+    foundPositions.sorted shouldBe locations.map { case (x, y) =>
+      (x, y, 1)
+    }.sorted
   }
 
   it should "explore only the places with treasures" in {
@@ -49,6 +53,62 @@ class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
         (x, y, containsTreasure(x, y))
       }
       .filter(_._3 != 0)
-    foundPositions should contain theSameElementsAs expected
+    foundPositions.sorted shouldBe expected.sorted
   }
+
+  it should "explore only the places with treasures2" in {
+    println(s"size of field: $sss")
+
+    val methods: Seq[(String, (Area => Coeval[ExploreResponse]) => (Area, Int) => Explorator)] = Seq(
+      "exploratorBatched" -> Miner.exploratorBatched[Coeval],
+      "exploratorBinary" -> Miner.exploratorBinary[Coeval],
+      "exploratorBy3" -> Miner.exploratorBy3[Coeval]
+    )
+
+    methods.map { case (methodName, exploreMethod) =>
+      Seq(25).map { frequency =>
+        def containsTreasure(x: Int, y: Int): Boolean =
+          (x + y * sss) % frequency == 0
+
+        def treasures(a: Area): Int = a.locations.map { case (x, y) =>
+          if (containsTreasure(x, y)) 1
+          else 0
+        }.sum
+
+        val callsCounter = new AtomicLong(0)
+        val treasureCounter = new AtomicLong(0)
+        val zeroAreaExplores = new AtomicLong(0)
+        val locationSizes = new AtomicLong(0)
+
+        val explore: Area => Coeval[ExploreResponse] = { a =>
+          {
+            if (a.sizeX == 0 || a.sizeY == 0) zeroAreaExplores.incrementAndGet()
+            callsCounter.incrementAndGet()
+            locationSizes.addAndGet(a.locations.size)
+            val t = treasures(a)
+            treasureCounter.addAndGet(t)
+            Coeval.delay(ExploreResponse(a, t))
+          }
+        }
+
+        val foundPositions = exploreMethod(explore)(area, treasures(area))
+          .toListL
+          .runSyncUnsafe()
+
+        println(
+          s"$methodName, frequency $frequency, calls: ${callsCounter.get()}, " +
+            s"locationSizes: ${locationSizes}"
+        )
+
+        val expected = locations
+          .map { case (x, y) =>
+            (x, y, if (containsTreasure(x, y)) 1 else 0)
+          }
+          .filter(_._3 == 1)
+
+        foundPositions.sorted shouldBe expected.sorted
+      }
+    }
+  }
+
 }
