@@ -66,7 +66,7 @@ case class CheckExploreTimings[F[
     }
 
     println("exploring started")
-    val sizes = Seq.range(1, 10)
+    val sizes = Seq.range(1, 34)
 
     sizes.foldLeft(Applicative[F].pure(())) { case (acc, cur) =>
       acc.flatMap(_ => runOne(cur))
