@@ -21,8 +21,6 @@ case class Miner[F[
       for {
         queue <- Resource.liftF(MVar.empty[F, Int])
         _ <- Concurrent[F].background {
-          implicit val overflowStrategy: OverflowStrategy[License] =
-            OverflowStrategy.BackPressure(2)
           Observable
             .repeat(())
             .mapParallelUnorderedF(digParallelism)(_ => client.issueLicense())
