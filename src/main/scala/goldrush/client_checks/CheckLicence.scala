@@ -1,25 +1,25 @@
 package goldrush.client_checks
 
+import cats.Traverse
 import cats.effect.Timer
+import cats.syntax.functor._
 import goldrush.Types.ThrowableMonadError
 import goldrush.{Client, License}
-import monix.eval.{TaskLift, TaskLike}
-import monix.reactive.Observable
 
-case class CheckLicence[F[_]: ThrowableMonadError: Timer: TaskLift: TaskLike](
-    client: Client[F]
-) extends MethodChecker[F, Int, License](client) {
+case class CheckLicence[F[_]: ThrowableMonadError: Timer](client: Client[F])
+    extends MethodChecker[F, Int, License](client) {
 
   override val dataName: String = "threadsCount"
-  override val input: Seq[Int] = Seq(1, 2, 3, 4, 5, 8, 16, 32)
+  override val input: Seq[Int] = Seq(16)
 
   override def checkMethod(input: Int): F[Seq[Data[License]]] = {
-    val request = Observable
-      .range(0, 1000)
-      .mapParallelUnorderedF(input)(_ => timed(_.issueLicense()))
+    val result: F[Seq[Data[License]]] = Traverse[Seq]
+      .traverse(Seq.range(0, 100))(_ => timed(_.issueLicense()))
 
-    TaskLift[F]
-      .apply(request.toListL.map(_.toSeq))
+    result.map { x =>
+      println(x.mkString(",\n"))
+      x
+    }
   }
 
 }

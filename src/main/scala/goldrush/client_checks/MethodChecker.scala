@@ -4,8 +4,8 @@ import cats.effect.Timer
 import cats.syntax.applicativeError._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
-import goldrush.Client
 import goldrush.Types.ThrowableMonadError
+import goldrush.{Client, DockerTag}
 
 import scala.concurrent.duration.MILLISECONDS
 
@@ -61,13 +61,14 @@ abstract class MethodChecker[F[_]: ThrowableMonadError: Timer, Inp, Out](
     val (fails, successes) = data.partition(_.result.isLeft)
 
     println(dataInfo)
+    println(s"total results count: ${data.size}")
     printTimings("fails", fails)
     printTimings("successes", successes)
     println("\n")
   }
 
   def run: F[Unit] = {
-    println("Started")
+    println(s"Started ${DockerTag.dockerTag}")
 
     CatsUtil.runSequentially(input) { i =>
       checkMethod(i)

@@ -1,6 +1,7 @@
 package goldrush
 
 import cats.effect.ExitCode
+import goldrush.client_checks.{CheckExplore, CheckLicence, FakeClient}
 import monix.eval.{Task, TaskApp}
 import sttp.client3.asynchttpclient.monix.AsyncHttpClientMonixBackend
 
@@ -10,9 +11,10 @@ object Main extends TaskApp {
       baseUrl <- Config.getBaseUrl[Task]
       backend <- AsyncHttpClientMonixBackend()
       client <- ClientImpl[Task](baseUrl, backend)
-      miner = Miner[Task](client)
-      _ <- miner.mine
+//      client = new FakeClient[Task]()
+//      checker = new CheckLicence[Task](client)
+      checker = new CheckExplore[Task](client)
+      _ <- checker.run
+      _ <- backend.close()
     } yield ExitCode.Success
 }
-
-
