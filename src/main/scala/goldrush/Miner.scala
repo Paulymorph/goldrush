@@ -1,7 +1,6 @@
 package goldrush
 
-import cats.effect.concurrent.MVar
-import cats.effect.{Concurrent, ContextShift, Resource, Sync}
+import cats.effect.{ConcurrentEffect, ContextShift}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.{Applicative, Parallel}
@@ -11,32 +10,17 @@ import monix.reactive.Observable
 
 case class Miner[F[
     _
-]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
+]: Parallel: ConcurrentEffect: ContextShift: TaskLike: TaskLift](
     client: Client[F]
 ) {
   def mine: F[Int] = {
     val digParallelism = 36
-
-    val licensesR: Resource[F, F[Int]] = {
-      for {
-        queue <- Resource.liftF(MVar.empty[F, Int])
-        _ <- Concurrent[F].background {
-          Observable
-            .repeat(())
-            .mapParallelUnorderedF(digParallelism)(_ => client.issueLicense())
-            .flatMapIterable { license =>
-              Seq.fill(license.digAllowed - license.digUsed)(license.id)
-            }
-            .mapEvalF(queue.put)
-            .completedF[F]
-        }
-      } yield queue.take
-    }
+    val maxActiveLicenses = 10
 
     val digger = {
       Observable
-        .fromResource(licensesR)
-        .flatMap { nextLicense =>
+        .fromResource(Licenser(maxActiveLicenses, client.issueLicense()))
+        .flatMap { licenseProducer =>
           explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
             .mapParallelUnorderedF(digParallelism) { case (x, y, amount) =>
               def dig(
@@ -44,8 +28,9 @@ case class Miner[F[
                   foundTreasures: Seq[String]
               ): F[Seq[String]] = {
                 for {
-                  license <- nextLicense
-                  newTreasures <- client.dig(license, x, y, level)
+                  newTreasures <- licenseProducer.use { license =>
+                    client.dig(license, x, y, level)
+                  }
                   nextTreasures = foundTreasures ++ newTreasures
                   goDeeper = level < 10 && nextTreasures.size < amount
                   result <-
