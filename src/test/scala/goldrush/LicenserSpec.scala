@@ -24,7 +24,7 @@ class LicenserSpec extends AsyncFlatSpec with MonixSpec with Matchers {
         licenseGenerator.use(l => Task.delay(println(s"Used $l")))
       }
     } { (_, issuedCounter) =>
-      issuedCounter.get.map(_ shouldBe (limit + licenseUses))
+      issuedCounter.get.map(_ shouldBe <=(limit + licenseUses))
     }
   }
 
@@ -37,7 +37,7 @@ class LicenserSpec extends AsyncFlatSpec with MonixSpec with Matchers {
         licenseGenerator.use(l => Task.delay(println(s"Used $l")))
       }
     } { (_, issuedCounter) =>
-      issuedCounter.get.map(_ shouldBe (limit + licenseUses / licenseAllows))
+      issuedCounter.get.map(_ shouldBe <=(limit + licenseUses / licenseAllows + 1))
     }
   }
 
