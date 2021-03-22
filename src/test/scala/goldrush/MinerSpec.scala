@@ -9,11 +9,7 @@ import org.scalatest.{Assertion, BeforeAndAfterAll}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
-  implicit val s: SchedulerService = Scheduler.computation(name = "test")
-  override def afterAll() = {
-    s.shutdown()
-  }
+class MinerSpec extends AnyFlatSpec with MonixSpec with Matchers {
   private val areaSide = 100
   private val area = Area(0, 0, areaSide, areaSide)
   private val locations: Seq[(Int, Int)] = area.locations
