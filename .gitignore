@@ -1,3 +1,6 @@
 target/
 .idea
 .bsp
+src-backups/
+/src-backups/
+/src-backups/**/**
