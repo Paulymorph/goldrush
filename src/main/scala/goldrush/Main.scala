@@ -10,11 +10,13 @@ object Main extends TaskApp {
     for {
       baseUrl <- Config.getBaseUrl[Task]
       backend <- AsyncHttpClientMonixBackend()
-      client <- ClientImpl[Task](baseUrl, backend)
-//      client = new FakeClient[Task]()
+//      client <- ClientImpl[Task](baseUrl, backend)
+      client = new FakeClient[Task]()
 //      checker = new CheckLicence[Task](client)
-      checker = new CheckExplore[Task](client)
-      _ <- checker.run
+//      checker = new CheckExplore[Task](client)
+//      _ <- checker.run
+      miner = Miner(client)
+      _ <- miner.mine
       _ <- backend.close()
     } yield ExitCode.Success
 }
