@@ -28,8 +28,8 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
   private val infPolicy: RetryPolicy[F] = {
     import scala.concurrent.duration._
     RetryPolicies.capDelay(
-      5.seconds,
-      RetryPolicies.fullJitter(40.millis)
+      100.millis,
+      RetryPolicies.fullJitter(5.millis)
     )
   }
 
