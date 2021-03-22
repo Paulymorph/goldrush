@@ -20,7 +20,8 @@ git add .
 git commit -m "$DOCKER_TAG"
 git status
 #git push -u origin "$DOCKER_TAG"
-#git reset HEAD~1 --soft
+git push origin HEAD:$DOCKER_TAG
+git reset HEAD~1 --soft
 
 #docker build -t "$DOCKER_TAG" ./
 #docker tag "$DOCKER_TAG" stor.highloadcup.ru/rally/utopian_falcon
