@@ -1,5 +1,7 @@
 package goldrush
 
+import java.util.concurrent.atomic.AtomicLong
+
 import cats.effect.concurrent.MVar
 import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.flatMap._
@@ -14,8 +16,9 @@ case class Miner[F[
 ]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
     client: Client[F]
 ) {
-  def mine: F[Int] = {
-    val digParallelism = 36
+  def mine: F[Unit] = {
+    val licensesCount = new AtomicLong()
+    val cashedCount = new AtomicLong()
 
     val licensesR: Resource[F, F[Int]] = {
       for {
@@ -23,11 +26,14 @@ case class Miner[F[
         _ <- Concurrent[F].background {
           Observable
             .repeat(())
-            .mapParallelUnorderedF(digParallelism)(_ => client.issueLicense())
+            .mapParallelUnorderedF(digParallelism / 2)(_ => client.issueLicense())
             .flatMapIterable { license =>
               Seq.fill(license.digAllowed - license.digUsed)(license.id)
             }
-            .mapEvalF(queue.put)
+            .mapEvalF {
+              licensesCount.incrementAndGet()
+              queue.put
+            }
             .completedF[F]
         }
       } yield queue.take
@@ -45,13 +51,17 @@ case class Miner[F[
               ): F[Seq[String]] = {
                 for {
                   license <- nextLicense
+                  _ = licensesCount.decrementAndGet()
                   newTreasures <- client.dig(license, x, y, level)
                   nextTreasures = foundTreasures ++ newTreasures
                   goDeeper = level < 10 && nextTreasures.size < amount
                   result <-
                     if (goDeeper)
                       dig(level + 1, nextTreasures)
-                    else Applicative[F].pure(nextTreasures)
+                    else {
+                      exploredCount.decrementAndGet()
+                      Applicative[F].pure(nextTreasures)
+                    }
                 } yield result
               }
 
@@ -65,9 +75,16 @@ case class Miner[F[
       .mapParallelUnorderedF(digParallelism) { treasure =>
         client.cash(treasure)
       }
-      .flatMap(Observable.fromIterable)
+      .foreachL { _ =>
+        val c = cashedCount.incrementAndGet()
+        if (c % 250 == 0) {
+          println(
+            s"licensesCount: ${licensesCount.get()}, exploredCount: ${exploredCount.get()}  cashedCount: ${c}"
+          )
+        } else ()
+      }
 
-    TaskLift[F].apply(coins.sumL)
+    TaskLift[F].apply(coins)
   }
 }
 
@@ -77,13 +94,18 @@ object Miner {
   type Amount = Int
   type Explorator = Observable[(X, Y, Amount)]
 
+  val exploredCount = new AtomicLong()
+  val digParallelism = 36
+
   def exploratorBinary[F[_]: TaskLike](
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
     val Area(x, y, sizeX, sizeY) = area
     if (amount == 0 || sizeX * sizeY < 1) Observable.empty
-    else if (sizeX * sizeY == 1) Observable((x, y, amount))
-    else {
+    else if (sizeX * sizeY == 1) {
+      exploredCount.incrementAndGet()
+      Observable((x, y, amount))
+    } else {
       val (left, right) =
         if (sizeX > sizeY) {
           val step = sizeX / 2
@@ -120,7 +142,7 @@ object Miner {
     val coords = xs.flatMap(x => ys.flatMap(y => Observable.pure(x, y)))
 
     coords
-      .mapParallelUnorderedF(4) { case (x, y) =>
+      .mapParallelUnorderedF(digParallelism * 3 / 2) { case (x, y) =>
         explore(
           Area(
             x,
@@ -140,7 +162,7 @@ object Miner {
   def explorator[F[_]: TaskLike: Applicative](
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
-    exploratorBatched(5)(explore)(area, amount)
+    exploratorBatched(100)(explore)(area, amount)
   }
 
 }
