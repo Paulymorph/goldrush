@@ -5,7 +5,8 @@ import monix.eval.{Task, TaskApp}
 import sttp.client3.asynchttpclient.monix.AsyncHttpClientMonixBackend
 
 object Main extends TaskApp {
-  override def run(args: List[String]): Task[ExitCode] =
+  override def run(args: List[String]): Task[ExitCode] = {
+    println(s"Started. ${DockerTag.dockerTag}")
     for {
       baseUrl <- Config.getBaseUrl[Task]
       backend <- AsyncHttpClientMonixBackend()
@@ -13,4 +14,5 @@ object Main extends TaskApp {
       miner = Miner[Task](client)
       _ <- miner.mine
     } yield ExitCode.Success
+  }
 }
