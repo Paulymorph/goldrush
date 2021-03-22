@@ -35,6 +35,13 @@ libraryDependencies += "org.typelevel" %% "log4cats-slf4j" % log4cats
 val logging = "1.7.30"
 libraryDependencies += "org.slf4j" % "slf4j-simple" % logging
 
+val scalatest = "3.2.5"
+libraryDependencies ++=
+  Seq(
+    "org.scalactic" %% "scalactic" % scalatest % Test,
+    "org.scalatest" %% "scalatest" % scalatest % Test
+  )
+
 assemblyMergeStrategy in assembly := {
   case PathList("META-INF", _) => MergeStrategy.discard
   case PathList(properties, _) if properties.endsWith(".properties") =>

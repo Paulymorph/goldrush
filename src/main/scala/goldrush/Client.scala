@@ -1,21 +1,14 @@
 package goldrush
 
 import cats.effect.Sync
-import cats.{Applicative, Functor, MonadError}
+import cats.{Functor, MonadError}
 import io.circe
 import io.circe.generic.auto._
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-import retry.{RetryDetails, RetryPolicies, RetryPolicy, Sleep}
+import retry.{RetryPolicies, RetryPolicy, Sleep}
 import sttp.client3.circe._
-import sttp.client3.{
-  HttpError,
-  Response,
-  ResponseException,
-  SttpBackend,
-  UriContext,
-  emptyRequest
-}
+import sttp.client3.{HttpError, Response, ResponseException, SttpBackend, UriContext, emptyRequest}
 import sttp.model.{MediaType, StatusCode}
 
 trait Client[F[_]] {
@@ -136,7 +129,7 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
 }
 
 case class Area(posX: Int, posY: Int, sizeX: Int, sizeY: Int) {
-  def locations: Seq[(Int, Int)] = {
+  lazy val locations: Seq[(Int, Int)] = {
     val yds = 1 to sizeY
     for {
       dx <- 1 to sizeX
