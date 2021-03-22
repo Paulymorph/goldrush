@@ -10,7 +10,7 @@ object Main extends TaskApp {
       baseUrl <- Config.getBaseUrl[Task]
       backend <- AsyncHttpClientMonixBackend()
       client <- ClientImpl[Task](baseUrl, backend)
-      miner = Miner[Task](client)
-      _ <- miner.mine
+      timingExplorer = new CheckExploreTimings[Task](client)
+      _ <- timingExplorer.exploreTimings
     } yield ExitCode.Success
 }
