@@ -5,6 +5,7 @@ import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.{Applicative, Parallel}
+import goldrush.Licenser.{Issuer, Licenser}
 import goldrush.Miner._
 import monix.eval.{TaskLift, TaskLike}
 import monix.reactive.Observable
@@ -17,21 +18,7 @@ case class Miner[F[
   def mine: F[Int] = {
     val digParallelism = 36
 
-    val licensesR: Resource[F, F[Int]] = {
-      for {
-        queue <- Resource.liftF(MVar.empty[F, Int])
-        _ <- Concurrent[F].background {
-          Observable
-            .repeat(())
-            .mapParallelUnorderedF(digParallelism)(_ => client.issueLicense())
-            .flatMapIterable { license =>
-              Seq.fill(license.digAllowed - license.digUsed)(license.id)
-            }
-            .mapEvalF(queue.put)
-            .completedF[F]
-        }
-      } yield queue.take
-    }
+    val licensesR: Resource[F, Licenser[F]] = Licenser(digParallelism, Issuer.free(client))
 
     val digger = {
       Observable
