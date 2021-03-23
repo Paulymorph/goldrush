@@ -12,8 +12,7 @@ object Main extends TaskApp {
       baseUrl <- Config.getBaseUrl[Task]
       backend <- AsyncHttpClientMonixBackend()
       client <- ClientImpl[Task](baseUrl, backend)
-      miner = Miner[Task](client)
-      _ <- miner.mine
+      _ <- Miner[Task](client).use(_.mine)
     } yield ExitCode.Success
   }
 }
