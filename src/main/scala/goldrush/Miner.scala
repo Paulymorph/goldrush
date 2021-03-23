@@ -8,7 +8,7 @@ import cats.{Applicative, Parallel}
 import goldrush.Constants._
 import goldrush.Miner._
 import monix.eval.{TaskLift, TaskLike}
-import monix.reactive.Observable
+import monix.reactive.{Observable, OverflowStrategy}
 
 case class Miner[F[
     _
@@ -31,6 +31,7 @@ case class Miner[F[
               Counters.getLicenceCount.incrementAndGet()
               queue.put(x)
             }
+            .asyncBoundary(OverflowStrategy.BackPressure(licenceBufferSize))
             .completedF[F]
         }
       } yield queue.take
@@ -41,6 +42,7 @@ case class Miner[F[
         .fromResource(licensesR)
         .flatMap { nextLicense =>
           explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
+            .asyncBoundary(OverflowStrategy.BackPressure(exploreBufferSize))
             .mapParallelUnorderedF(digParallelism) { case (x, y, amount) =>
               def dig(
                   level: Int,
@@ -65,6 +67,7 @@ case class Miner[F[
               dig(1, Seq.empty)
             }
         }
+        .asyncBoundary(OverflowStrategy.BackPressure(digBufferSize))
         .flatMap(Observable.fromIterable)
     }
 
@@ -156,6 +159,18 @@ object Miner {
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
     exploratorBatched(maxExploreArea)(explore)(area, amount)
+  }
+
+  def exploratorResource[F[_]: TaskLike: Applicative: Concurrent: TaskLift](
+      explore: Area => F[ExploreResponse]
+  )(area: Area, amount: Int): Resource[F, F[(X, Y, Amount)]] = {
+    for {
+      queue <- Resource.liftF(MVar.empty[F, (X, Y, Amount)])
+      _ <- Concurrent[F].background {
+        exploratorBatched(maxExploreArea)(explore)(area, amount)
+          .completedF[F]
+      }
+    } yield queue.take
   }
 
 }
