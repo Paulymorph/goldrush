@@ -8,7 +8,7 @@ import cats.{Applicative, Parallel}
 import goldrush.Constants._
 import goldrush.Miner._
 import monix.eval.{TaskLift, TaskLike}
-import monix.reactive.Observable
+import monix.reactive.{Observable, OverflowStrategy}
 
 case class Miner[F[
     _
@@ -31,6 +31,7 @@ case class Miner[F[
               Counters.getLicenceCount.incrementAndGet()
               queue.put(x)
             }
+            .asyncBoundary(OverflowStrategy.BackPressure(licenceBufferSize))
             .completedF[F]
         }
       } yield queue.take
@@ -39,32 +40,37 @@ case class Miner[F[
     val digger = {
       Observable
         .fromResource(licensesR)
-        .flatMap { nextLicense =>
-          explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
-            .mapParallelUnorderedF(digParallelism) { case (x, y, amount) =>
-              def dig(
-                  level: Int,
-                  foundTreasures: Seq[String]
-              ): F[Seq[String]] = {
-                for {
-                  license <- nextLicense
-                  _ = Counters.digsCount.incrementAndGet()
-                  newTreasures <- client.dig(license, x, y, level)
-                  nextTreasures = foundTreasures ++ newTreasures
-                  goDeeper = level < 10 && nextTreasures.size < amount
-                  result <-
-                    if (goDeeper)
-                      dig(level + 1, nextTreasures)
-                    else {
-                      Counters.foundTreasuresCount.incrementAndGet()
-                      Applicative[F].pure(nextTreasures)
-                    }
-                } yield result
-              }
+        .zip(
+          Observable.fromResource(
+            exploratorResource(client.explore)(Area(0, 0, 3500, 3500), 490_000)
+          )
+        )
+        .mapParallelUnorderedF(digParallelism) { case (nextLicense, nextAreaF) =>
+          def dig(
+              level: Int,
+              foundTreasures: Seq[String]
+          ): F[Seq[String]] = {
+            for {
+              nextArea <- nextAreaF
+              (x, y, amount) = nextArea
+              license <- nextLicense
+              _ = Counters.digsCount.incrementAndGet()
+              newTreasures <- client.dig(license, x, y, level)
+              nextTreasures = foundTreasures ++ newTreasures
+              goDeeper = level < 10 && nextTreasures.size < amount
+              result <-
+                if (goDeeper)
+                  dig(level + 1, nextTreasures)
+                else {
+                  Counters.foundTreasuresCount.incrementAndGet()
+                  Applicative[F].pure(nextTreasures)
+                }
+            } yield result
+          }
 
-              dig(1, Seq.empty)
-            }
+          dig(1, Seq.empty)
         }
+        .asyncBoundary(OverflowStrategy.BackPressure(cashBufferSize))
         .flatMap(Observable.fromIterable)
     }
 
@@ -145,6 +151,7 @@ object Miner {
           )
         )
       }
+      .asyncBoundary(OverflowStrategy.BackPressure(exploreBufferSize))
       .filter(_.amount > 0)
       .flatMap { response =>
         exploratorBinary(explore)(response.area, response.amount)
@@ -156,6 +163,21 @@ object Miner {
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
     exploratorBatched(maxExploreArea)(explore)(area, amount)
+  }
+
+  def exploratorResource[F[_]: TaskLike: Applicative: Concurrent: TaskLift](
+      explore: Area => F[ExploreResponse]
+  )(area: Area, amount: Int): Resource[F, F[(X, Y, Amount)]] = {
+    for {
+      queue <- Resource.liftF(MVar.empty[F, (X, Y, Amount)])
+      _ <- Concurrent[F].background {
+        Observable
+          .repeat(())
+          .flatMap(_ => exploratorBatched(maxExploreArea)(explore)(area, amount))
+          .asyncBoundary(OverflowStrategy.BackPressure(exploreBufferSize))
+          .completedF[F]
+      }
+    } yield queue.take
   }
 
 }
