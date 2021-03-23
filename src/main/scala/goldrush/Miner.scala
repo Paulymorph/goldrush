@@ -63,8 +63,8 @@ object Miner {
   ): Resource[F, Miner[F]] = {
     val digParallelism = 36
     for {
-      licenser <- Licenser(digParallelism, Issuer.free(client))
       goldStore <- Resource.liftF(GoldStoreImpl[F](100))
+      licenser <- Licenser(digParallelism, Issuer.paid(1, client, goldStore))
       miner = new Miner[F](goldStore, licenser, client, digParallelism)
     } yield miner
   }
