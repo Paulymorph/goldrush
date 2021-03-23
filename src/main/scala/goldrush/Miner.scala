@@ -7,7 +7,7 @@ import cats.syntax.functor._
 import cats.{Applicative, Parallel}
 import goldrush.Miner._
 import monix.eval.{TaskLift, TaskLike}
-import monix.reactive.Observable
+import monix.reactive.{Observable, OverflowStrategy}
 
 case class Miner[F[
     _
@@ -15,6 +15,7 @@ case class Miner[F[
     client: Client[F]
 ) {
   def mine: F[Int] = {
+    val defaultBuffer = OverflowStrategy.BackPressure(1024)
     val digParallelism = 36
 
     val licensesR: Resource[F, F[Int]] = {
@@ -28,6 +29,7 @@ case class Miner[F[
               Seq.fill(license.digAllowed - license.digUsed)(license.id)
             }
             .mapEvalF(queue.put)
+            .asyncBoundary(OverflowStrategy.BackPressure(10))
             .completedF[F]
         }
       } yield queue.take
@@ -38,6 +40,7 @@ case class Miner[F[
         .fromResource(licensesR)
         .flatMap { nextLicense =>
           explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
+            .asyncBoundary(defaultBuffer)
             .mapParallelUnorderedF(digParallelism) { case (x, y, amount) =>
               def dig(
                   level: Int,
