@@ -7,8 +7,9 @@ import cats.syntax.functor._
 import cats.{Applicative, Parallel}
 import goldrush.Constants._
 import goldrush.Miner._
+import monix.catnap.ConcurrentQueue
 import monix.eval.{TaskLift, TaskLike}
-import monix.reactive.Observable
+import monix.reactive.{Observable, OverflowStrategy}
 
 case class Miner[F[
     _
@@ -40,8 +41,12 @@ case class Miner[F[
       Observable
         .fromResource(licensesR)
         .flatMap { nextLicense =>
-          explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
-            .mapParallelUnorderedF(digParallelism) { case (x, y, amount) =>
+          Observable
+            .fromResource(exploratorResource(client.explore)(Area(0, 0, 3500, 3500), 490_000))
+            .flatMap { nextAreaF => Observable.repeatEvalF(nextAreaF) }
+            .asyncBoundary(OverflowStrategy.Unbounded)
+            .mapParallelUnorderedF(digParallelism) { nextArea =>
+              val (x, y, amount) = nextArea
               def dig(
                   level: Int,
                   foundTreasures: Seq[String]
@@ -62,7 +67,7 @@ case class Miner[F[
                 } yield result
               }
 
-              dig(1, Seq.empty)
+              dig(0, Seq.empty)
             }
         }
         .flatMap(Observable.fromIterable)
@@ -156,6 +161,22 @@ object Miner {
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
     exploratorBatched(maxExploreArea)(explore)(area, amount)
+  }
+
+  def exploratorResource[F[_]: TaskLike: Applicative: Concurrent: TaskLift: ContextShift](
+      explore: Area => F[ExploreResponse]
+  )(area: Area, amount: Int): Resource[F, F[(X, Y, Amount)]] = {
+    for {
+      queue <- Resource.liftF(ConcurrentQueue.unbounded[F, (X, Y, Amount)]())
+      _ <- Concurrent[F].background {
+        exploratorBatched(maxExploreArea)(explore)(area, amount)
+          .mapEvalF { x =>
+            Counters.getLicenceCount.incrementAndGet()
+            queue.offer(x)
+          }
+          .completedF[F]
+      }
+    } yield queue.poll
   }
 
 }
