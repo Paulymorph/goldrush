@@ -23,7 +23,7 @@ case class Miner[F[
         _ <- Concurrent[F].background {
           Observable
             .repeat(())
-            .mapParallelUnorderedF(digParallelism / 2)(_ => client.issueLicense())
+            .mapParallelUnorderedF(licenceParallelism)(_ => client.issueLicense())
             .flatMapIterable { license =>
               Seq.fill(license.digAllowed - license.digUsed)(license.id)
             }
@@ -69,7 +69,7 @@ case class Miner[F[
     }
 
     val coins = digger
-      .mapParallelUnorderedF(digParallelism / 4) { treasure =>
+      .mapParallelUnorderedF(cashParallelism) { treasure =>
         client.cash(treasure)
       }
       .foreachL { x =>
@@ -126,7 +126,7 @@ object Miner {
     }
   }
 
-  def exploratorBatched[F[_]: TaskLike: Applicative](maxStep: Int = 5)(
+  def exploratorBatched[F[_]: TaskLike: Applicative](maxStep: Int)(
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
     import area._
