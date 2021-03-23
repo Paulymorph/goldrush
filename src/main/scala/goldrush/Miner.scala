@@ -8,7 +8,7 @@ import cats.{Applicative, Parallel}
 import goldrush.Constants._
 import goldrush.Miner._
 import monix.eval.{TaskLift, TaskLike}
-import monix.reactive.Observable
+import monix.reactive.{Observable, OverflowStrategy}
 
 case class Miner[F[
     _
@@ -41,6 +41,7 @@ case class Miner[F[
         .fromResource(licensesR)
         .flatMap { nextLicense =>
           explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
+            .asyncBoundary(OverflowStrategy.Unbounded)
             .mapParallelUnorderedF(digParallelism) { case (x, y, amount) =>
               def dig(
                   level: Int,
@@ -156,6 +157,18 @@ object Miner {
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
     exploratorBatched(maxExploreArea)(explore)(area, amount)
+  }
+
+  def exploratorResource[F[_]: TaskLike: Applicative: Concurrent: TaskLift](
+      explore: Area => F[ExploreResponse]
+  )(area: Area, amount: Int): Resource[F, F[(X, Y, Amount)]] = {
+    for {
+      queue <- Resource.liftF(MVar.empty[F, (X, Y, Amount)])
+      _ <- Concurrent[F].background {
+        exploratorBatched(maxExploreArea)(explore)(area, amount)
+          .completedF[F]
+      }
+    } yield queue.take
   }
 
 }
