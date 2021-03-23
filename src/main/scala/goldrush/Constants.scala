@@ -4,7 +4,7 @@ object Constants {
 
   val digParallelism = 64
   val exploreParallelism = digParallelism * 2
-  val licenceParallelism = digParallelism / 2
+  val licenceParallelism = digParallelism / 16
   val cashParallelism = 8
   val maxExploreArea = 10
   val clientCapDelay = 5
@@ -13,6 +13,7 @@ object Constants {
   val licenceBufferSize = 50
   val exploreBufferSize = 256
   val digBufferSize = 256
+  val goldStoreSize = 256
 
   def print(): Unit = {
     println(
