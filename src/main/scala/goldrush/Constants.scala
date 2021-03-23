@@ -4,7 +4,7 @@ object Constants {
 
   val digParallelism = 64
   val exploreParallelism = digParallelism * 2
-  val licenceParallelism = digParallelism / 2
+  val licenceParallelism = digParallelism / 16
   val cashParallelism = 8
   val maxExploreArea = 10
   val clientCapDelay = 5

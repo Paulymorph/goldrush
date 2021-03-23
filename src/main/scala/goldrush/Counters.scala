@@ -8,7 +8,8 @@ object Counters {
   val foundTreasuresCount = new AtomicLong()
   val exploresCount = new AtomicLong()
   val digsCount = new AtomicLong()
-  val getLicenceCount = new AtomicLong()
+  val licenceCount = new AtomicLong()
+  val licenceTriesCount = new AtomicLong()
   val cashesCount = new AtomicLong()
   val cashesSum = new AtomicLong()
 
@@ -16,7 +17,8 @@ object Counters {
     println(
       s"explores: ${exploresCount.get()}, " +
         s"foundCells: ${foundCellsCount.get()}, " +
-        s"licences: ${getLicenceCount.get()}, " +
+        s"licences: ${licenceCount.get()}, " +
+        s"licenceTries: ${licenceTriesCount.get()}, " +
         s"digs: ${digsCount.get()}, " +
         s"foundTreasures: ${foundTreasuresCount.get()}, " +
         s"cashes: ${cashesCount.get()}" +
