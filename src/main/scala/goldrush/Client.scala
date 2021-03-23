@@ -1,5 +1,6 @@
 package goldrush
 
+import Constants._
 import cats.effect.Sync
 import cats.{Functor, MonadError}
 import io.circe
@@ -28,8 +29,8 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
   private val infPolicy: RetryPolicy[F] = {
     import scala.concurrent.duration._
     RetryPolicies.capDelay(
-      100.millis,
-      RetryPolicies.fullJitter(5.millis)
+      clientCapDelay.millis,
+      RetryPolicies.fullJitter(clientFullJitter.millis)
     )
   }
 
@@ -72,6 +73,7 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
         .body(area)
         .response(asJsonEither[ApiError, ExploreResponse])
     unwrapInf("explore") {
+      Counters.exploresCount.incrementAndGet()
       backend.send(request)
     }
   }
