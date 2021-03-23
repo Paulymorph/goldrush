@@ -8,7 +8,7 @@ import cats.{Applicative, Parallel}
 import goldrush.Constants._
 import goldrush.Miner._
 import monix.eval.{TaskLift, TaskLike}
-import monix.reactive.Observable
+import monix.reactive.{Observable, OverflowStrategy}
 
 case class Miner[F[
     _
@@ -31,6 +31,7 @@ case class Miner[F[
               Counters.getLicenceCount.incrementAndGet()
               queue.put(x)
             }
+            .asyncBoundary(OverflowStrategy.BackPressure(licenceBufferSize))
             .completedF[F]
         }
       } yield queue.take
@@ -65,13 +66,11 @@ case class Miner[F[
               dig(1, Seq.empty)
             }
         }
+        .asyncBoundary(OverflowStrategy.BackPressure(licenceBufferSize))
         .flatMap(Observable.fromIterable)
     }
 
     val coins = digger
-      .mapParallelUnorderedF(cashParallelism) { treasure =>
-        client.cash(treasure)
-      }
       .foreachL { x =>
         val c = Counters.cashesCount.incrementAndGet()
         Counters.cashesSum.addAndGet(x.size)
@@ -145,6 +144,7 @@ object Miner {
           )
         )
       }
+      .asyncBoundary(OverflowStrategy.BackPressure(exploreBufferSize))
       .filter(_.amount > 0)
       .flatMap { response =>
         exploratorBinary(explore)(response.area, response.amount)
@@ -156,6 +156,21 @@ object Miner {
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
     exploratorBatched(maxExploreArea)(explore)(area, amount)
+  }
+
+  def exploratorResource[F[_]: TaskLike: Applicative: Concurrent: TaskLift](
+      explore: Area => F[ExploreResponse]
+  )(area: Area, amount: Int): Resource[F, F[(X, Y, Amount)]] = {
+    for {
+      queue <- Resource.liftF(MVar.empty[F, (X, Y, Amount)])
+      _ <- Concurrent[F].background {
+        Observable
+          .repeat(())
+          .flatMap(_ => exploratorBatched(maxExploreArea)(explore)(area, amount))
+          .asyncBoundary(OverflowStrategy.BackPressure(exploreBufferSize))
+          .completedF[F]
+      }
+    } yield queue.take
   }
 
 }
