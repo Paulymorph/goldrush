@@ -2,9 +2,9 @@ package goldrush
 
 object Constants {
 
-  val digParallelism = 32
-  val exploreParallelism = digParallelism * 2
-  val licenceParallelism = digParallelism * 2
+  val digParallelism = 24
+  val exploreParallelism = digParallelism * 3 / 2
+  val licenceParallelism = digParallelism * 3 / 2
   val cashParallelism = 6
   val maxExploreArea = 10
   val clientCapDelay = 5
