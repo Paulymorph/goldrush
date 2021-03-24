@@ -1,16 +1,16 @@
-FROM hseeberger/scala-sbt:15.0.2_1.4.7_2.13.4 AS build
+FROM hseeberger/scala-sbt:11.0.10_1.4.9_2.13.5 AS build
 COPY . /goldrush/
 WORKDIR /goldrush
 RUN sbt '; set assemblyJarName in assembly := "app.jar"\
     ; set assemblyOutputPath in assembly := new File("/app/app.jar")\
     ;  assembly'
 
-FROM ghcr.io/graalvm/graalvm-ce:21.0.0 AS run
+FROM ghcr.io/graalvm/graalvm-ce:java11-21.0.0.2 AS run
+RUN gu install native-image
 WORKDIR /goldrush
 COPY --from=build /app/app.jar app.jar
-RUN gu install native-image
 RUN native-image -jar app.jar application \
-  --initialize-at-run-time=io.netty \
+  --initialize-at-build-time=org.slf4j.impl.SimpleLogger,org.slf4j.impl.StaticLoggerBinder,org.slf4j.LoggerFactory \
   --trace-class-initialization=org.slf4j.impl.SimpleLogger \
   -H:+ReportExceptionStackTraces
-ENTRYPOINT ["application"]
+ENTRYPOINT ["./application"]
