@@ -1,11 +1,17 @@
 package goldrush
 
-import cats.Monad
+import cats.{Applicative, FlatMap, Monad}
 import cats.effect.concurrent.MVar
 import cats.effect.{Concurrent, Resource}
-import monix.reactive.Observable
+import monix.reactive.{Observable, OverflowStrategy}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
+import goldrush.Counters.{
+  freeLicenceDigsCount,
+  freeLicenceTriesCount,
+  paidLicenceDigsCount,
+  paidLicenceTriesCount
+}
 import monix.eval.{TaskLift, TaskLike}
 
 object Licenser {
@@ -32,15 +38,34 @@ object Licenser {
     } yield queue.take
   }
 
+  def applyObserve[F[_]: Concurrent: TaskLike: TaskLift](
+      parallelism: Int,
+      issuer: Issuer[F]
+  ): Observable[LicenseId] = {
+    Observable
+      .repeat(())
+      .mapParallelUnorderedF(parallelism)(_ => issuer)
+      .flatMapIterable { license =>
+        Seq.fill(license.digAllowed - license.digUsed)(license.id)
+      }
+      .asyncBoundary(OverflowStrategy.Unbounded)
+  }
+
   object Issuer {
-    def free[F[_]](client: Client[F]): Issuer[F] = {
-      client.issueLicense()
+    def free[F[_]: Monad](client: Client[F]): Issuer[F] = {
+      for {
+        _ <- Applicative[F].pure(freeLicenceTriesCount.incrementAndGet())
+        licence <- client.issueLicense()
+        _ <- Applicative[F].pure(freeLicenceDigsCount.addAndGet(licence.digAllowed))
+      } yield licence
     }
 
     def paid[F[_]: Monad](howMany: Int, client: Client[F], store: GoldStore[F]): Issuer[F] = {
       for {
         coins <- store.tryTake(howMany)
+        _ = paidLicenceTriesCount.incrementAndGet()
         license <- client.issueLicense(coins: _*)
+        _ = paidLicenceDigsCount.addAndGet(license.digAllowed)
       } yield license
     }
   }
