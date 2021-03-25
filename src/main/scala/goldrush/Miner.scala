@@ -22,22 +22,12 @@ class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLik
     client: Client[F]
 ) {
   def mine: F[Unit] = {
-    val maxDuration = 60 * 1e9.toLong
-
-    Observable(5, 15, 30, 60, 100, 200, 300, 500).mapEvalF { areaSize =>
-      val startTime = System.nanoTime()
-      exploratorBatched(areaSize)(client.explore)(Area(0, 0, 3500, 3500), 490_000)
-        .takeWhile(_ => (System.nanoTime() - startTime) < maxDuration)
-        .map { _ => Counters.foundCellsCount.incrementAndGet() }
-        .countL
-        .map { size =>
-          println(s"areaSize: $areaSize, countL: $size")
-          Counters.print()
-          println(Miner.toStringTreasureForArea())
-
-          Miner.treasuresForBatchArea.clear()
-          Counters.clear()
-        }
+    explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000).map { x =>
+      val c = Counters.foundCellsCount.incrementAndGet()
+      if (c % 3000 == 0) {
+        Counters.print()
+        Miner.printTreasureForArea()
+      }
     }.completedF
   }
 }
@@ -50,14 +40,16 @@ object Miner {
 
   val treasuresForBatchArea = new ConcurrentHashMap[Int, Int](128, 0.75f, 8)
 
-  def toStringTreasureForArea() = {
-    Miner.treasuresForBatchArea
-      .entrySet()
-      .asScala
-      .toSeq
-      .sortBy(_.getKey)
-      .map { entry => s"(${entry.getKey}, ${entry.getValue})" }
-      .mkString(", ")
+  def printTreasureForArea(): Unit = {
+    println(
+      Miner.treasuresForBatchArea
+        .entrySet()
+        .asScala
+        .toSeq
+        .sortBy(_.getKey)
+        .map { entry => s"(${entry.getKey}, ${entry.getValue})" }
+        .mkString(", ")
+    )
   }
 
   def apply[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
@@ -125,7 +117,6 @@ object Miner {
           )
         )
       }
-      .asyncBoundary(OverflowStrategy.Unbounded)
       .map { x =>
         treasuresForBatchArea.compute(
           x.amount,
@@ -136,6 +127,7 @@ object Miner {
         )
         x
       }
+      .asyncBoundary(OverflowStrategy.Unbounded)
       .filter(_.amount > 0)
       .flatMap { response =>
         exploratorBinary(explore)(response.area, response.amount)
