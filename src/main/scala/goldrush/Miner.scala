@@ -17,53 +17,9 @@ class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLik
     client: Client[F]
 ) {
   def mine: F[Unit] = {
-    val digger = {
-      explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
-        .asyncBoundary(OverflowStrategy.Unbounded)
-        .mapParallelUnorderedF(digParallelism) { nextArea =>
-          val (x, y, amount) = nextArea
-
-          def dig(
-              level: Int,
-              foundTreasures: Seq[String]
-          ): Observable[Seq[String]] = {
-            for {
-              license <- licenser
-              _ = Counters.digsCount.incrementAndGet()
-              newTreasures <- Observable.from(client.dig(license, x, y, level))
-              nextTreasures = foundTreasures ++ newTreasures
-              goDeeper = level < 10 && nextTreasures.size < amount
-              result <-
-                if (goDeeper)
-                  dig(level + 1, nextTreasures)
-                else {
-                  Counters.foundTreasuresCount.incrementAndGet()
-                  Observable.pure(nextTreasures)
-                }
-            } yield result
-          }
-
-          dig(1, Seq.empty).toListL.map(_.flatten)
-        }
-        .asyncBoundary(OverflowStrategy.Unbounded)
-        .flatMap(Observable.fromIterable)
-
-    }
-
-    val coins = digger
-      .mapParallelUnorderedF(cashParallelism) { treasure =>
-        client.cash(treasure)
-      }
-      .mapEvalF(c => goldStore.put(c: _*).as(c))
-      .foreachL { x =>
-        val c = Counters.cashesCount.incrementAndGet()
-        Counters.cashesSum.addAndGet(x.size)
-        if (c % 250 == 0) {
-          Counters.print()
-        } else ()
-      }
-
-    TaskLift[F].apply(coins)
+    explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
+      .asyncBoundary(OverflowStrategy.Unbounded)
+      .completedF
   }
 }
 
