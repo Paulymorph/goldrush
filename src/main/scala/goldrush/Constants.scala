@@ -1,5 +1,7 @@
 package goldrush
 
+import java.util.concurrent.PriorityBlockingQueue
+
 object Constants {
 
   val digParallelism = 36
@@ -14,6 +16,8 @@ object Constants {
   val exploreBufferSize = 256
   val digBufferSize = 256
   val goldStoreSize = 256
+
+  val startTime = System.nanoTime()
 
   def print(): Unit = {
     println(

@@ -13,6 +13,7 @@ object Main extends TaskApp {
       backend <- AsyncHttpClientMonixBackend()
       client <- ClientImpl[Task](baseUrl, backend)
       _ <- Miner[Task](client).use(_.mine)
+      _ <- backend.close()
     } yield ExitCode.Success
   }
 }
