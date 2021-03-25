@@ -1,15 +1,20 @@
 package goldrush
 
+import java.util.concurrent.ConcurrentHashMap
+
 import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.{Applicative, Parallel}
 import goldrush.Constants._
+import goldrush.Counters._
 import goldrush.Licenser.{Issuer, LicenseId, Licenser}
 import goldrush.Miner._
 import monix.catnap.ConcurrentQueue
 import monix.eval.{TaskLift, TaskLike}
 import monix.reactive.{Observable, OverflowStrategy}
+
+import scala.jdk.CollectionConverters._
 
 class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
     goldStore: GoldStore[F],
@@ -17,53 +22,23 @@ class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLik
     client: Client[F]
 ) {
   def mine: F[Unit] = {
-    val digger = {
-      explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
-        .asyncBoundary(OverflowStrategy.Unbounded)
-        .mapParallelUnorderedF(digParallelism) { nextArea =>
-          val (x, y, amount) = nextArea
+    val maxDuration = 60 * 1e9.toLong
 
-          def dig(
-              level: Int,
-              foundTreasures: Seq[String]
-          ): Observable[Seq[String]] = {
-            for {
-              license <- licenser
-              _ = Counters.digsCount.incrementAndGet()
-              newTreasures <- Observable.from(client.dig(license, x, y, level))
-              nextTreasures = foundTreasures ++ newTreasures
-              goDeeper = level < 10 && nextTreasures.size < amount
-              result <-
-                if (goDeeper)
-                  dig(level + 1, nextTreasures)
-                else {
-                  Counters.foundTreasuresCount.incrementAndGet()
-                  Observable.pure(nextTreasures)
-                }
-            } yield result
-          }
-
-          dig(1, Seq.empty).toListL.map(_.flatten)
-        }
-        .asyncBoundary(OverflowStrategy.Unbounded)
-        .flatMap(Observable.fromIterable)
-
-    }
-
-    val coins = digger
-      .mapParallelUnorderedF(cashParallelism) { treasure =>
-        client.cash(treasure)
-      }
-      .mapEvalF(c => goldStore.put(c: _*).as(c))
-      .foreachL { x =>
-        val c = Counters.cashesCount.incrementAndGet()
-        Counters.cashesSum.addAndGet(x.size)
-        if (c % 250 == 0) {
+    Observable(5, 15, 30, 60, 100, 200, 300, 500).mapEvalF { areaSize =>
+      val startTime = System.nanoTime()
+      exploratorBatched(areaSize)(client.explore)(Area(0, 0, 3500, 3500), 490_000)
+        .takeWhile(_ => (System.nanoTime() - startTime) < maxDuration)
+        .map { _ => Counters.foundCellsCount.incrementAndGet() }
+        .countL
+        .map { size =>
+          println(s"areaSize: $areaSize, countL: $size")
           Counters.print()
-        } else ()
-      }
+          println(Miner.toStringTreasureForArea())
 
-    TaskLift[F].apply(coins)
+          Miner.treasuresForBatchArea.clear()
+          Counters.clear()
+        }
+    }.completedF
   }
 }
 
@@ -72,6 +47,18 @@ object Miner {
   type Y = Int
   type Amount = Int
   type Explorator = Observable[(X, Y, Amount)]
+
+  val treasuresForBatchArea = new ConcurrentHashMap[Int, Int](128, 0.75f, 8)
+
+  def toStringTreasureForArea() = {
+    Miner.treasuresForBatchArea
+      .entrySet()
+      .asScala
+      .toSeq
+      .sortBy(_.getKey)
+      .map { entry => s"(${entry.getKey}, ${entry.getValue})" }
+      .mkString(", ")
+  }
 
   def apply[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
       client: Client[F]
@@ -89,7 +76,6 @@ object Miner {
     val Area(x, y, sizeX, sizeY) = area
     if (amount == 0 || sizeX * sizeY < 1) Observable.empty
     else if (sizeX * sizeY == 1) {
-      Counters.foundCellsCount.incrementAndGet()
       Observable((x, y, amount))
     } else {
       val (left, right) =
@@ -140,6 +126,16 @@ object Miner {
         )
       }
       .asyncBoundary(OverflowStrategy.Unbounded)
+      .map { x =>
+        treasuresForBatchArea.compute(
+          x.amount,
+          { case (k, v) =>
+            if (Option(k).isEmpty || Option(v).isEmpty) 1
+            else v + 1
+          }
+        )
+        x
+      }
       .filter(_.amount > 0)
       .flatMap { response =>
         exploratorBinary(explore)(response.area, response.amount)
