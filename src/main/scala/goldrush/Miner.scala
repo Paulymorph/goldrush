@@ -22,22 +22,12 @@ class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLik
     client: Client[F]
 ) {
   def mine: F[Unit] = {
-    val maxDuration = 60 * 1e9.toLong
-
-    Observable(5, 15, 30, 60, 100, 200, 300, 500).mapEvalF { areaSize =>
-      val startTime = System.nanoTime()
-      exploratorBatched(areaSize)(client.explore)(Area(0, 0, 3500, 3500), 490_000)
-        .takeWhile(_ => (System.nanoTime() - startTime) < maxDuration)
-        .map { _ => Counters.foundCellsCount.incrementAndGet() }
-        .countL
-        .map { size =>
-          println(s"areaSize: $areaSize, countL: $size")
-          Counters.print()
-          println(Miner.toStringTreasureForArea())
-
-          Miner.treasuresForBatchArea.clear()
-          Counters.clear()
-        }
+    explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000).map { x =>
+      val c = Counters.foundCellsCount.incrementAndGet()
+      if (c % 3000 == 0) {
+        Counters.print()
+        Miner.printTreasureForArea()
+      }
     }.completedF
   }
 }
@@ -50,14 +40,16 @@ object Miner {
 
   val treasuresForBatchArea = new ConcurrentHashMap[Int, Int](128, 0.75f, 8)
 
-  def toStringTreasureForArea() = {
-    Miner.treasuresForBatchArea
-      .entrySet()
-      .asScala
-      .toSeq
-      .sortBy(_.getKey)
-      .map { entry => s"(${entry.getKey}, ${entry.getValue})" }
-      .mkString(", ")
+  def printTreasureForArea(): Unit = {
+    println(
+      Miner.treasuresForBatchArea
+        .entrySet()
+        .asScala
+        .toSeq
+        .sortBy(_.getKey)
+        .map { entry => s"(${entry.getKey}, ${entry.getValue})" }
+        .mkString(", ")
+    )
   }
 
   def apply[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
@@ -114,28 +106,22 @@ object Miner {
     val ys = Observable.range(posY, posY + sizeY, maxStep).map(_.toInt)
     val coords = xs.flatMap(x => ys.flatMap(y => Observable.pure(x, y)))
 
-    coords
-      .mapParallelUnorderedF(exploreParallelism) { case (x, y) =>
-        explore(
-          Area(
-            x,
-            y,
-            Math.min(maxStep, posX + sizeX - x),
-            Math.min(maxStep, posY + sizeY - y)
-          )
-        )
-      }
-      .asyncBoundary(OverflowStrategy.Unbounded)
-      .map { x =>
-        treasuresForBatchArea.compute(
-          x.amount,
-          { case (k, v) =>
-            if (Option(k).isEmpty || Option(v).isEmpty) 1
-            else v + 1
+    Observable
+      .fromIteratorF(
+        coords
+          .mapParallelUnorderedF(exploreParallelism) { case (x, y) =>
+            explore(
+              Area(
+                x,
+                y,
+                Math.min(maxStep, posX + sizeX - x),
+                Math.min(maxStep, posY + sizeY - y)
+              )
+            )
           }
-        )
-        x
-      }
+          .toListL
+          .map(_.sortBy(x => -x.amount).iterator)
+      )
       .filter(_.amount > 0)
       .flatMap { response =>
         exploratorBinary(explore)(response.area, response.amount)
