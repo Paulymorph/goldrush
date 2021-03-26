@@ -4,11 +4,9 @@ import java.util.concurrent.ConcurrentHashMap
 
 import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.flatMap._
-import cats.syntax.functor._
 import cats.{Applicative, Parallel}
 import goldrush.Constants._
-import goldrush.Counters._
-import goldrush.Licenser.{Issuer, LicenseId, Licenser}
+import goldrush.Licenser.{Issuer, LicenseId}
 import goldrush.Miner._
 import monix.catnap.ConcurrentQueue
 import monix.eval.{TaskLift, TaskLike}
@@ -24,21 +22,45 @@ class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLik
   def mine: F[Unit] = {
     val maxDuration = 60 * 1e9.toLong
 
-    Observable(5, 15, 30, 60, 100, 200, 300, 500).mapEvalF { areaSize =>
-      val startTime = System.nanoTime()
-      exploratorBatched(areaSize)(client.explore)(Area(0, 0, 3500, 3500), 490_000)
-        .takeWhile(_ => (System.nanoTime() - startTime) < maxDuration)
-        .map { _ => Counters.foundCellsCount.incrementAndGet() }
-        .countL
-        .map { size =>
-          println(s"areaSize: $areaSize, countL: $size")
-          Counters.print()
-          println(Miner.toStringTreasureForArea())
+    Observable(15, 30, 60, 100)
+      .mapEvalF { areaSize =>
+        val startTime = System.nanoTime()
+        exploratorBatched(areaSize)(client.explore)(Area(0, 0, 1000, 1000), 490_000)
+          .takeWhile(_ => (System.nanoTime() - startTime) < maxDuration)
+          .map { _ => Counters.foundCellsCount.incrementAndGet() }
+          .countL
+          .map { size =>
+            println(
+              s"areaSize: $areaSize, countL: $size, timeSpent: ${(System.nanoTime() - startTime)}"
+            )
+            Counters.print()
+            println(Miner.toStringTreasureForArea())
 
-          Miner.treasuresForBatchArea.clear()
-          Counters.clear()
-        }
-    }.completedF
+            Miner.treasuresForBatchArea.clear()
+            Counters.clear()
+          }
+      }
+      .completedF
+      .flatMap { _ =>
+        Observable(15, 30, 60, 100).mapEvalF { areaSize =>
+          val startTime = System.nanoTime()
+          println("with priority")
+          exploratorBatchedPriority(areaSize)(client.explore)(Area(0, 0, 1000, 1000), 490_000)
+            .takeWhile(_ => (System.nanoTime() - startTime) < maxDuration)
+            .map { _ => Counters.foundCellsCount.incrementAndGet() }
+            .countL
+            .map { size =>
+              println(
+                s"areaSize: $areaSize, countL: $size, timeSpent: ${(System.nanoTime() - startTime)}"
+              )
+              Counters.print()
+              println(Miner.toStringTreasureForArea())
+
+              Miner.treasuresForBatchArea.clear()
+              Counters.clear()
+            }
+        }.completedF
+      }
   }
 }
 
@@ -136,6 +158,48 @@ object Miner {
         )
         x
       }
+      .filter(_.amount > 0)
+      .flatMap { response =>
+        exploratorBinary(explore)(response.area, response.amount)
+      }
+
+  }
+
+  def exploratorBatchedPriority[F[_]: TaskLike: Applicative](maxStep: Int)(
+      explore: Area => F[ExploreResponse]
+  )(area: Area, amount: Int): Explorator = {
+    import area._
+    val xs = Observable.range(posX, posX + sizeX, maxStep).map(_.toInt)
+    val ys = Observable.range(posY, posY + sizeY, maxStep).map(_.toInt)
+    val coords = xs.flatMap(x => ys.flatMap(y => Observable.pure(x, y)))
+
+    Observable
+      .fromIteratorF(
+        coords
+          .mapParallelUnorderedF(exploreParallelism) { case (x, y) =>
+            explore(
+              Area(
+                x,
+                y,
+                Math.min(maxStep, posX + sizeX - x),
+                Math.min(maxStep, posY + sizeY - y)
+              )
+            )
+          }
+          .asyncBoundary(OverflowStrategy.Unbounded)
+          .map { x =>
+            treasuresForBatchArea.compute(
+              x.amount,
+              { case (k, v) =>
+                if (Option(k).isEmpty || Option(v).isEmpty) 1
+                else v + 1
+              }
+            )
+            x
+          }
+          .toListL
+          .map(_.sortBy(x => -x.amount).iterator)
+      )
       .filter(_.amount > 0)
       .flatMap { response =>
         exploratorBinary(explore)(response.area, response.amount)
