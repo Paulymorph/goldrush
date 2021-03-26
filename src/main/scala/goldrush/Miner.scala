@@ -65,7 +65,7 @@ object Miner {
     for {
       goldStore <- Resource.liftF(GoldStoreImpl[F](100))
       licenser <- Resource.liftF(
-        Licenser.noBackground(Issuer.paid(100, client, goldStore))
+        Licenser.noBackground(Issuer.paid(1, client, goldStore))
       )
       miner = new Miner[F](goldStore, licenser, client, digParallelism)
     } yield miner

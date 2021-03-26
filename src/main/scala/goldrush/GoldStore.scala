@@ -23,9 +23,7 @@ class GoldStoreImpl[F[_]: Applicative] private (store: ConcurrentQueue[F, Coin])
   }
 
   override def tryTake(coinsNumber: Coin): F[Seq[Coin]] = {
-    Seq.fill(coinsNumber)(coinsNumber).flatTraverse { _ =>
-      store.tryPoll.map(_.toSeq)
-    }
+    store.drain(0, coinsNumber)
   }
 }
 
