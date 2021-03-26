@@ -99,6 +99,7 @@ class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
     val explorator = makeExplorator(allArea)(containsTreasure)
     val actualResult = explorator.toListL.runSyncUnsafe()
 
+    println(s"actualResult: $actualResult")
     val expectations = allArea.locations
       .filter { case (x, y) => containsTreasure(x, y) }
       .map { case (x, y) => (x, y, 1) }

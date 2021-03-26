@@ -1,11 +1,16 @@
 package goldrush
 
-import java.util.Comparator
-import java.util.concurrent.{LinkedBlockingQueue, PriorityBlockingQueue, TimeUnit}
+import java.util.{Collections, Comparator}
+import java.util.concurrent.{
+  ConcurrentHashMap,
+  LinkedBlockingQueue,
+  PriorityBlockingQueue,
+  TimeUnit
+}
 import java.util.concurrent.atomic.AtomicLong
 
 import cats.effect.concurrent.MVar
-import cats.effect.{Concurrent, ContextShift, Resource, Sync}
+import cats.effect.{Concurrent, ContextShift, Resource, Sync, Timer}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.{Applicative, Parallel}
@@ -13,7 +18,7 @@ import goldrush.Miner._
 import monix.eval.{TaskLift, TaskLike}
 import monix.reactive.{Observable, OverflowStrategy}
 
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.{Duration, MILLISECONDS}
 case class Miner[F[
     _
 ]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
@@ -22,7 +27,8 @@ case class Miner[F[
   def mine: F[Unit] = {
     val digParallelism = 36
 
-    val licensesCount = new AtomicLong(0)
+//    val licensesCount = new AtomicLong(0)
+    val licensesDict = new ConcurrentHashMap[Int, Int](16, 0.75f, 8)
     val moneyQueue = new LinkedBlockingQueue[Seq[Int]](100)
 
     val licensesR: Resource[F, F[Int]] = {
@@ -31,20 +37,27 @@ case class Miner[F[
         _ <- Concurrent[F].background {
           Observable
             .timerRepeated(
-              Duration(10, TimeUnit.MILLISECONDS),
+              Duration(10, TimeUnit.SECONDS),
               Duration(5, TimeUnit.MILLISECONDS),
               ()
             )
-            .mapParallelUnorderedF[F, Option[License]](digParallelism) { _ =>
-              if (licensesCount.get() > 25)
+            .mapParallelUnorderedF[F, Option[License]](8) { _ =>
+//              println("trying to get license")
+              if (licensesDict.size() > 8)
+                Applicative[F].pure(None)
+              else
                 client
-                  .issueLicense(Some(moneyQueue.poll()).map(_.take(21)).getOrElse(Seq.empty): _*)
+                  .issueLicense(
+//                    Some(moneyQueue.poll(1, TimeUnit.MILLISECONDS))
+//                      .map(_.take(1))
+//                      .getOrElse(Seq.empty): _*
+                  )
                   .map(Option(_))
-              else Applicative[F].pure(None)
             }
             .flatMap(Observable.fromIterable(_))
             .flatMapIterable { license =>
-              licensesCount.addAndGet(license.digAllowed)
+              licensesDict.put(license.id, license.digAllowed)
+//              licensesCount.addAndGet(license.digAllowed)
               Seq.fill(license.digAllowed - license.digUsed)(license.id)
             }
             .mapEvalF(queue.put)
@@ -53,39 +66,25 @@ case class Miner[F[
       } yield queue.take
     }
 
-//    val exploreResource = {
-//      val exploreOS: OverflowStrategy.BackPressure = OverflowStrategy.BackPressure(2048)
-//      for {
-//        queue <- Resource.liftF(MVar.empty[F, (X, Y, Amount)])
-//        _ <- Concurrent[F].background {
-//          explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
-//            .asyncBoundary(exploreOS)
-//            .mapEvalF(queue.put)
-//            .completedF[F]
-//        }
-//      } yield queue.take
-//    }
-
-    val exploreObservable = {
-      val exploreOS: OverflowStrategy.BackPressure = OverflowStrategy.BackPressure(2048)
-      explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
-        .asyncBoundary(exploreOS)
-    }
-
     val digger = {
       Observable
         .fromResource(licensesR)
         .flatMap { licenseF =>
-          exploreObservable
+          explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
             .mapParallelOrderedF(digParallelism) { case (x, y, amount) =>
+              def decreaseLicense(licenceId: Int) = {
+                val v = licensesDict.compute(licenceId, { (k, v) => v - 1 })
+                if (v == 0) licensesDict.remove(licenceId)
+              }
+
               def dig(
                   level: Int,
                   foundTreasures: Seq[String]
               ): F[Seq[String]] = {
                 for {
                   license <- licenseF
-                  _ = licensesCount.decrementAndGet()
                   newTreasures <- client.dig(license, x, y, level)
+                  _ = decreaseLicense(license)
                   nextTreasures = foundTreasures ++ newTreasures
                   goDeeper = level < 10 && nextTreasures.size < amount
                   result <-
@@ -149,6 +148,13 @@ object Miner {
     }
   }
 
+  val prirityQ = new PriorityBlockingQueue[ExploreResponse](
+    10000,
+    Collections.reverseOrder((o1: ExploreResponse, o2: ExploreResponse) =>
+      o1.amount.compareTo(o2.amount)
+    )
+  )
+
   def exploratorBatched[F[_]: TaskLike: Applicative](maxStep: Int = 5)(
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
@@ -156,11 +162,6 @@ object Miner {
     val xs = Observable.range(posX, posX + sizeX, maxStep).map(_.toInt)
     val ys = Observable.range(posY, posY + sizeY, maxStep).map(_.toInt)
     val coords = xs.flatMap(x => ys.flatMap(y => Observable.pure(x, y)))
-
-    val prirityQ = new PriorityBlockingQueue[ExploreResponse](
-      10000,
-      (o1: ExploreResponse, o2: ExploreResponse) => o1.amount.compareTo(o2.amount)
-    )
 
     coords
       .mapParallelUnorderedF(8) { case (x, y) =>
@@ -174,15 +175,21 @@ object Miner {
         )
       }
       .filter(_.amount > 0)
-      .map(prirityQ.put)
-      .flatMap { _ =>
-        Observable
-          .repeatEval(prirityQ.take())
-          .flatMap { response =>
-            exploratorBinary(explore)(response.area, response.amount)
-          }
+      .map { x =>
+        prirityQ.add(x)
+        x
       }
-
+      .asyncBoundary(OverflowStrategy.BackPressure(1000))
+      .map(_ => prirityQ.take())
+      .flatMap { response =>
+//        println(s"prirityQ size: ${prirityQ.size()}")
+//        Observable
+//          .from(Applic/ative[F].pure(Thread.sleep(100)))
+//          .flatMap(_ =>
+        exploratorBinary(explore)(response.area, response.amount)
+          .asyncBoundary(OverflowStrategy.BackPressure(100))
+      }
+//      .completed
   }
 
   def explorator[F[_]: TaskLike: Applicative](
