@@ -1,6 +1,6 @@
-name := "goldrush"
+import sbt.Def.settings
 
-version := "0.1"
+name := "goldrush"
 
 scalaVersion := "2.13.4"
 
@@ -48,3 +48,11 @@ assemblyMergeStrategy in assembly := {
     MergeStrategy.first
   case _ => MergeStrategy.deduplicate
 }
+
+enablePlugins(BuildInfoPlugin, GitVersioning)
+
+settings(
+  buildInfoKeys := Seq[BuildInfoKey](version),
+  buildInfoPackage := "build",
+  buildInfoObject := "BuildInfo"
+)
