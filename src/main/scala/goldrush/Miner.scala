@@ -1,6 +1,8 @@
 package goldrush
 
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.Comparator
+import java.util.concurrent.{LinkedBlockingQueue, PriorityBlockingQueue, TimeUnit}
+import java.util.concurrent.atomic.AtomicLong
 
 import cats.effect.concurrent.MVar
 import cats.effect.{Concurrent, ContextShift, Resource, Sync}
@@ -8,93 +10,102 @@ import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.{Applicative, Parallel}
 import goldrush.Miner._
-import monix.eval.{Task, TaskLift, TaskLike}
+import monix.eval.{TaskLift, TaskLike}
 import monix.reactive.{Observable, OverflowStrategy}
-import Miner._
-import monix.execution.CancelablePromise
 
-import scala.concurrent.{Future, Promise}
-import scala.util.Success
+import scala.concurrent.duration.Duration
 case class Miner[F[
     _
 ]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
     client: Client[F]
 ) {
-  def mine: F[Int] = {
+  def mine: F[Unit] = {
     val digParallelism = 36
 
-    val promise = new AtomicBoolean(false)
+    val licensesCount = new AtomicLong(0)
+    val moneyQueue = new LinkedBlockingQueue[Seq[Int]](100)
 
-    val concurrentStart = Concurrent[F].start()
-
-    val licensesR: Observable[Int] = {
-      implicit val licenseOS: OverflowStrategy.BackPressure = OverflowStrategy.BackPressure(10)
-      Observable
-        .repeat(())
-        .dropWhile(_ => promise.get() == false)
-        .mapParallelUnorderedF(digParallelism)(_ => client.issueLicense())
-        .flatMapIterable { license =>
-          Seq.fill(license.digAllowed - license.digUsed)(license.id)
-        }
-    }
-
-    val exploreResource = {
-      val exploreOS: OverflowStrategy.BackPressure = OverflowStrategy.BackPressure(2048)
+    val licensesR: Resource[F, F[Int]] = {
       for {
-        queue <- Resource.liftF(MVar.empty[F, (X, Y, Amount)])
-        _ <- Concurrent[F].start {
-          explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
-            .map { x =>
-              promise.set(true)
-              x
+        queue <- Resource.liftF(MVar.empty[F, Int])
+        _ <- Concurrent[F].background {
+          Observable
+            .timerRepeated(
+              Duration(10, TimeUnit.MILLISECONDS),
+              Duration(5, TimeUnit.MILLISECONDS),
+              ()
+            )
+            .mapParallelUnorderedF[F, Option[License]](digParallelism) { _ =>
+              if (licensesCount.get() > 25)
+                client
+                  .issueLicense(Some(moneyQueue.poll()).map(_.take(21)).getOrElse(Seq.empty): _*)
+                  .map(Option(_))
+              else Applicative[F].pure(None)
             }
-            .asyncBoundary(exploreOS)
+            .flatMap(Observable.fromIterable(_))
+            .flatMapIterable { license =>
+              licensesCount.addAndGet(license.digAllowed)
+              Seq.fill(license.digAllowed - license.digUsed)(license.id)
+            }
             .mapEvalF(queue.put)
             .completedF[F]
         }
       } yield queue.take
     }
 
+//    val exploreResource = {
+//      val exploreOS: OverflowStrategy.BackPressure = OverflowStrategy.BackPressure(2048)
+//      for {
+//        queue <- Resource.liftF(MVar.empty[F, (X, Y, Amount)])
+//        _ <- Concurrent[F].background {
+//          explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
+//            .asyncBoundary(exploreOS)
+//            .mapEvalF(queue.put)
+//            .completedF[F]
+//        }
+//      } yield queue.take
+//    }
+
+    val exploreObservable = {
+      val exploreOS: OverflowStrategy.BackPressure = OverflowStrategy.BackPressure(2048)
+      explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
+        .asyncBoundary(exploreOS)
+    }
+
     val digger = {
       Observable
-        .fromResource(exploreResource)
-        .flatMap { nextAreaF =>
-          licensesR
-            .mapParallelOrderedF(digParallelism) { license =>
+        .fromResource(licensesR)
+        .flatMap { licenseF =>
+          exploreObservable
+            .mapParallelOrderedF(digParallelism) { case (x, y, amount) =>
               def dig(
                   level: Int,
-                  foundTreasures: Seq[String],
-                  x: X,
-                  y: Y,
-                  amount: Amount
+                  foundTreasures: Seq[String]
               ): F[Seq[String]] = {
                 for {
+                  license <- licenseF
+                  _ = licensesCount.decrementAndGet()
                   newTreasures <- client.dig(license, x, y, level)
                   nextTreasures = foundTreasures ++ newTreasures
                   goDeeper = level < 10 && nextTreasures.size < amount
                   result <-
-                    if (goDeeper) dig(level + 1, nextTreasures, x, y, amount)
+                    if (goDeeper) dig(level + 1, nextTreasures)
                     else Applicative[F].pure(nextTreasures)
                 } yield result
               }
 
-              for {
-                nextArea <- nextAreaF
-                (x, y, amount) = nextArea
-                res <- dig(1, Seq.empty, x, y, amount)
-              } yield res
+              dig(1, Seq.empty)
             }
             .flatMap(Observable.fromIterable)
         }
     }
 
-    val coins = digger
+    digger
       .mapParallelUnorderedF(digParallelism) { treasure =>
         client.cash(treasure)
       }
-      .flatMap(Observable.fromIterable)
-
-    TaskLift[F].apply(coins.sumL)
+      .foreachL(moneyQueue.offer(_))
+      .to[F]
   }
 }
 
@@ -146,25 +157,30 @@ object Miner {
     val ys = Observable.range(posY, posY + sizeY, maxStep).map(_.toInt)
     val coords = xs.flatMap(x => ys.flatMap(y => Observable.pure(x, y)))
 
-    Observable
-      .fromIteratorF(
-        coords
-          .mapParallelUnorderedF(32) { case (x, y) =>
-            explore(
-              Area(
-                x,
-                y,
-                Math.min(maxStep, posX + sizeX - x),
-                Math.min(maxStep, posY + sizeY - y)
-              )
-            )
-          }
-          .toListL
-          .map(_.sortBy(x => -x.amount).iterator)
-      )
+    val prirityQ = new PriorityBlockingQueue[ExploreResponse](
+      10000,
+      (o1: ExploreResponse, o2: ExploreResponse) => o1.amount.compareTo(o2.amount)
+    )
+
+    coords
+      .mapParallelUnorderedF(8) { case (x, y) =>
+        explore(
+          Area(
+            x,
+            y,
+            Math.min(maxStep, posX + sizeX - x),
+            Math.min(maxStep, posY + sizeY - y)
+          )
+        )
+      }
       .filter(_.amount > 0)
-      .flatMap { response =>
-        exploratorBinary(explore)(response.area, response.amount)
+      .map(prirityQ.put)
+      .flatMap { _ =>
+        Observable
+          .repeatEval(prirityQ.take())
+          .flatMap { response =>
+            exploratorBinary(explore)(response.area, response.amount)
+          }
       }
 
   }
