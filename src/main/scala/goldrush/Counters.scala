@@ -1,6 +1,5 @@
 package goldrush
 
-import java.util.concurrent.{ConcurrentHashMap, PriorityBlockingQueue}
 import java.util.concurrent.atomic.AtomicLong
 
 object Counters {
@@ -14,6 +13,8 @@ object Counters {
   val paidLicenceDigsCount = new AtomicLong()
   val cashesCount = new AtomicLong()
   val cashesSum = new AtomicLong()
+
+  val startTime = System.nanoTime()
 
   def clear(): Unit = {
     foundCellsCount.set(0)
@@ -29,7 +30,8 @@ object Counters {
 
   def print(): Unit = {
     println(
-      s"explores: ${exploresCount.get()}, " +
+      s"from start: ${(System.nanoTime() - startTime) / 1e6}ms, " +
+        s"explores: ${exploresCount.get()}, " +
         s"foundCells: ${foundCellsCount.get()},"
 //        s"digs: ${digsCount.get()}, " +
 //        s"freeLicenceTries: ${freeLicenceTriesCount.get()}, " +
