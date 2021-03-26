@@ -13,19 +13,9 @@ object Main extends TaskApp {
     for {
       logger <- Slf4jLogger.create[Task]
       _ <- logger.info(BuildInfo.version)
-      statistics <- Statistics[Task]
-      _ <- Task.deferAction { implicit scheduler =>
-        Task.delay {
-          scheduler.scheduleOnce(9.minutes + 50.seconds) {
-            statistics.getInfo.flatMap { info =>
-              logger.info(info.toString)
-            }.runAsyncAndForget
-          }
-        }
-      }
       baseUrl <- Config.getBaseUrl[Task]
       backend <- AsyncHttpClientMonixBackend()
-      client <- ClientImpl[Task](baseUrl, backend).map(StatisticsClient.wrap(statistics))
+      client <- ClientImpl[Task](baseUrl, backend)
       _ <- Miner[Task](client).use(_.mine)
     } yield ExitCode.Success
 }
