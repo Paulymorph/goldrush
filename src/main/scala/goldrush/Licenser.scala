@@ -23,7 +23,7 @@ object Licenser {
       _ <- Concurrent[F].background {
         Observable
           .repeat(())
-          .mapParallelUnorderedF(10)(_ => issuer)
+          .mapParallelUnorderedF(parallelism)(_ => issuer)
           .flatMapIterable { license =>
             Seq.fill(license.digAllowed - license.digUsed)(license.id)
           }
