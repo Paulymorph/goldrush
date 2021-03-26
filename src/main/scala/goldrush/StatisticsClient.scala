@@ -2,6 +2,7 @@ package goldrush
 
 import cats.FlatMap
 import cats.syntax.flatMap._
+import cats.syntax.apply._
 
 class StatisticsClient[F[_]: FlatMap] private (underlying: Client[F], statistics: Statistics[F])
     extends Client[F] {
@@ -15,7 +16,7 @@ class StatisticsClient[F[_]: FlatMap] private (underlying: Client[F], statistics
   override def explore(area: Area): F[ExploreResponse] = underlying.explore(area)
 
   override def dig(licenseId: Int, posX: Int, posY: Int, depth: Int): F[Seq[String]] =
-    underlying.dig(licenseId, posX, posY, depth)
+    underlying.dig(licenseId, posX, posY, depth) <* statistics.digged()
 
   override def cash(treasure: String): F[Seq[Int]] =
     underlying.cash(treasure)
