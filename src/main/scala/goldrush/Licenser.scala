@@ -10,6 +10,8 @@ import cats.syntax.functor._
 import cats.syntax.apply._
 import monix.eval.{TaskLift, TaskLike}
 
+import scala.util.Random
+
 object Licenser {
   type LicenseId = Int
   type Licenser[F[_]] = F[LicenseId]
@@ -62,6 +64,13 @@ object Licenser {
     def paid[F[_]: Monad](howMany: Int, client: Client[F], store: GoldStore[F]): Issuer[F] = {
       for {
         coins <- store.tryTake(howMany)
+        license <- client.issueLicense(coins: _*)
+      } yield license
+    }
+
+    def paidRandom[F[_]: Monad](max: Int, client: Client[F], store: GoldStore[F]): Issuer[F] = {
+      for {
+        coins <- store.tryTake(Random.nextInt(max + 1))
         license <- client.issueLicense(coins: _*)
       } yield license
     }
