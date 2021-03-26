@@ -3,7 +3,7 @@ package goldrush
 import cats.Monad
 import cats.effect.concurrent.MVar
 import cats.effect.{Concurrent, Resource}
-import monix.reactive.Observable
+import monix.reactive.{Observable, OverflowStrategy}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import monix.eval.{TaskLift, TaskLike}
@@ -17,6 +17,7 @@ object Licenser {
       parallelism: Int,
       issuer: Issuer[F]
   ): Resource[F, Licenser[F]] = {
+    implicit val backPressure: OverflowStrategy[License] = OverflowStrategy.BackPressure(6)
     for {
       queue <- Resource.liftF(MVar.empty[F, Int])
       _ <- Concurrent[F].background {
