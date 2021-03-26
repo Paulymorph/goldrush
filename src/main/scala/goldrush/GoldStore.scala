@@ -1,8 +1,7 @@
 package goldrush
 
-import cats.Monad
+import cats.Applicative
 import cats.effect.{Concurrent, ContextShift}
-import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.syntax.traverse._
 import goldrush.GoldStore.Coin
@@ -17,21 +16,22 @@ object GoldStore {
   type Coin = Int
 }
 
-class GoldStoreImpl[F[_]: Monad] private (store: ConcurrentQueue[F, Coin]) extends GoldStore[F] {
+class GoldStoreImpl[F[_]: Applicative] private (store: ConcurrentQueue[F, Coin])
+    extends GoldStore[F] {
   override def put(coins: Coin*): F[Unit] = {
     coins.traverse(store.tryOffer).void
   }
 
   override def tryTake(coinsNumber: Coin): F[Seq[Coin]] = {
-    store.drain(0, coinsNumber).flatTap { coins =>
-      store.offerMany(coins)
+    Seq.fill(coinsNumber)(coinsNumber).flatTraverse { _ =>
+      store.tryPoll.map(_.toSeq)
     }
   }
 }
 
 object GoldStoreImpl {
   def apply[F[_]: Concurrent: ContextShift](storageSize: Int): F[GoldStore[F]] = {
-    ConcurrentQueue.unbounded[F, Coin]().map { store =>
+    ConcurrentQueue.bounded[F, Coin](storageSize).map { store =>
       new GoldStoreImpl[F](store)
     }
   }
