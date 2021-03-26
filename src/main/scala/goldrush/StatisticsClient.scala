@@ -11,7 +11,7 @@ class StatisticsClient[F[_]: FlatMap] private (underlying: Client[F], statistics
   override def listLicenses(): F[Seq[License]] = underlying.listLicenses()
 
   override def issueLicense(coins: Int*): F[License] =
-    underlying.issueLicense().flatTap(l => statistics.issuedLicense(coins, l))
+    underlying.issueLicense(coins: _*).flatTap(l => statistics.issuedLicense(coins, l))
 
   override def explore(area: Area): F[ExploreResponse] = underlying.explore(area)
 
