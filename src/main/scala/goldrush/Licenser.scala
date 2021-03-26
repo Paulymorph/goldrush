@@ -68,9 +68,14 @@ object Licenser {
       } yield license
     }
 
-    def paidRandom[F[_]: Monad](max: Int, client: Client[F], store: GoldStore[F]): Issuer[F] = {
+    def paidRandom[F[_]: Monad: Sync](
+        max: Int,
+        client: Client[F],
+        store: GoldStore[F]
+    ): Issuer[F] = {
       for {
-        coins <- store.tryTake(Random.nextInt(max + 1))
+        r <- Sync[F].delay(Random.nextInt(max + 1))
+        coins <- store.tryTake(r)
         license <- client.issueLicense(coins: _*)
       } yield license
     }
