@@ -1,11 +1,13 @@
 package goldrush
 
-import cats.Monad
-import cats.effect.concurrent.MVar
-import cats.effect.{Concurrent, Resource}
+import cats.data.Chain
+import cats.{Applicative, Monad}
+import cats.effect.concurrent.{MVar, Ref}
+import cats.effect.{Concurrent, Resource, Sync}
 import monix.reactive.{Observable, OverflowStrategy}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
+import cats.syntax.apply._
 import monix.eval.{TaskLift, TaskLike}
 
 object Licenser {
@@ -31,6 +33,25 @@ object Licenser {
           .completedF[F]
       }
     } yield queue.take
+  }
+
+  def noBackground[F[_]: Sync](issuer: Issuer[F]) = {
+    def retrieveOrIssue(store: Ref[F, Chain[LicenseId]]): Licenser[F] = {
+      store.modify { licenses =>
+        licenses.uncons match {
+          case Some((license, left)) => left -> Applicative[F].pure(license)
+          case None =>
+            Chain.empty -> issuer.flatMap { license =>
+              val newLicenses =
+                Chain.fromSeq(Seq.fill(license.digAllowed - license.digUsed)(license.id))
+              store.update(_ ++ newLicenses) *> retrieveOrIssue(store)
+            }
+        }
+      }.flatten
+    }
+    Ref.of[F, Chain[LicenseId]](Chain.empty[LicenseId]).map { licenseStore =>
+      retrieveOrIssue(licenseStore)
+    }
   }
 
   object Issuer {
