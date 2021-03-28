@@ -39,23 +39,9 @@ case class StatisticsInfo(
     licensesCapacity: Int,
     spentCoins: Map[Int, LicenseStats],
     digTimes: Int
-) {
-  override def toString: String = this.productElementNames
-    .zip(this.productIterator)
-    .map { case (name, value) =>
-      s"$name = $value"
-    }
-    .mkString(", ")
-}
+)
 
-case class LicenseStats(count: Int, min: Int, max: Int, sum: Int) {
-  override def toString: String = this.productElementNames
-    .zip(this.productIterator)
-    .map { case (name, value) =>
-      s"$name = $value"
-    }
-    .mkString(", ")
-}
+case class LicenseStats(count: Int, min: Int, max: Int, sum: Int)
 
 object Statistics {
   def apply[F[_]: Sync] =
