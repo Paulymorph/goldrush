@@ -1,62 +1,41 @@
 package goldrush
 
-import cats.effect.concurrent.MVar
 import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.{Applicative, Parallel}
+import goldrush.Licenser.{Issuer, Licenser}
 import goldrush.Miner._
 import monix.eval.{TaskLift, TaskLike}
 import monix.reactive.Observable
 
-case class Miner[F[
-    _
-]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
-    client: Client[F]
+class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
+    goldStore: GoldStore[F],
+    licenser: Licenser[F],
+    client: Client[F],
+    digParallelism: Int
 ) {
   def mine: F[Int] = {
-    val digParallelism = 36
-
-    val licensesR: Resource[F, F[Int]] = {
-      for {
-        queue <- Resource.liftF(MVar.empty[F, Int])
-        _ <- Concurrent[F].background {
-          Observable
-            .repeat(())
-            .mapParallelUnorderedF(digParallelism)(_ => client.issueLicense())
-            .flatMapIterable { license =>
-              Seq.fill(license.digAllowed - license.digUsed)(license.id)
-            }
-            .mapEvalF(queue.put)
-            .completedF[F]
-        }
-      } yield queue.take
-    }
-
     val digger = {
-      Observable
-        .fromResource(licensesR)
-        .flatMap { nextLicense =>
-          explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
-            .mapParallelUnorderedF(digParallelism) { case (x, y, amount) =>
-              def dig(
-                  level: Int,
-                  foundTreasures: Seq[String]
-              ): F[Seq[String]] = {
-                for {
-                  license <- nextLicense
-                  newTreasures <- client.dig(license, x, y, level)
-                  nextTreasures = foundTreasures ++ newTreasures
-                  goDeeper = level < 10 && nextTreasures.size < amount
-                  result <-
-                    if (goDeeper)
-                      dig(level + 1, nextTreasures)
-                    else Applicative[F].pure(nextTreasures)
-                } yield result
-              }
+      explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
+        .mapParallelUnorderedF(digParallelism) { case (x, y, amount) =>
+          def dig(
+              level: Int,
+              foundTreasures: Seq[String]
+          ): F[Seq[String]] = {
+            for {
+              license <- licenser
+              newTreasures <- client.dig(license, x, y, level)
+              nextTreasures = foundTreasures ++ newTreasures
+              goDeeper = level < 10 && nextTreasures.size < amount
+              result <-
+                if (goDeeper)
+                  dig(level + 1, nextTreasures)
+                else Applicative[F].pure(nextTreasures)
+            } yield result
+          }
 
-              dig(1, Seq.empty)
-            }
+          dig(1, Seq.empty)
         }
         .flatMap(Observable.fromIterable)
     }
@@ -66,6 +45,7 @@ case class Miner[F[
         client.cash(treasure)
       }
       .flatMap(Observable.fromIterable)
+      .mapEvalF(c => goldStore.put(c).as(c))
 
     TaskLift[F].apply(coins.sumL)
   }
@@ -76,6 +56,19 @@ object Miner {
   type Y = Int
   type Amount = Int
   type Explorator = Observable[(X, Y, Amount)]
+
+  def apply[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
+      client: Client[F]
+  ): Resource[F, Miner[F]] = {
+    val digParallelism = 36
+    for {
+      goldStore <- Resource.liftF(GoldStoreImpl[F](2000))
+      licenser <- Resource.liftF(
+        Licenser.noBackground(Issuer.paidRandom(1, client, goldStore))
+      )
+      miner = new Miner[F](goldStore, licenser, client, digParallelism)
+    } yield miner
+  }
 
   def exploratorBinary[F[_]: TaskLike](
       explore: Area => F[ExploreResponse]

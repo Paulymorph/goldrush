@@ -4,7 +4,7 @@ import cats.effect.Sync
 import cats.{Functor, MonadError}
 import io.circe
 import io.circe.generic.auto._
-import org.typelevel.log4cats.StructuredLogger
+import org.typelevel.log4cats.{Logger, StructuredLogger}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import retry.{RetryPolicies, RetryPolicy, Sleep}
 import sttp.client3.circe._
