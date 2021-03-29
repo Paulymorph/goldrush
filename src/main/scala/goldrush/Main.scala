@@ -3,6 +3,7 @@ package goldrush
 import build.BuildInfo
 import cats.effect.ExitCode
 import monix.eval.{Task, TaskApp}
+import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import sttp.client3.asynchttpclient.monix.AsyncHttpClientMonixBackend
 
@@ -13,6 +14,13 @@ object Main extends TaskApp {
     for {
       logger <- Slf4jLogger.create[Task]
       _ <- logger.info(BuildInfo.version)
+      _ <- startup(logger).tapError { e =>
+        logger.error(e)("Error running application")
+      }
+    } yield ExitCode.Success
+
+  private def startup(logger: Logger[Task]) =
+    for {
       statistics <- Statistics[Task]
       _ <- Task.deferAction { implicit scheduler =>
         Task.delay {
@@ -28,5 +36,5 @@ object Main extends TaskApp {
       client <- ClientImpl[Task](baseUrl, backend)
         .map(StatisticsClient.wrap(statistics))
       _ <- Miner[Task](client, statistics).use(_.mine)
-    } yield ExitCode.Success
+    } yield ()
 }

@@ -60,11 +60,13 @@ object Issuer {
 
     val bestCost = statistics.getInfo.map {
       case StatisticsInfo(_, _, spentCoins, digTimes, foundCoins) =>
-        val expectedDigProfit = foundCoins / digTimes
-        spentCoins.maxBy { case (cost, LicenseStats(count, _, _, sum)) =>
-          val expectedLicensesAvailable = sum / count
-          expectedDigProfit * expectedLicensesAvailable - cost
-        }._1
+        val expectedDigProfit = if (digTimes == 0) 0 else foundCoins / digTimes
+        spentCoins
+          .maxByOption { case (cost, LicenseStats(count, _, _, sum)) =>
+            val expectedLicensesAvailable = if (count == 0) 0 else sum / count
+            expectedDigProfit * expectedLicensesAvailable - cost
+          }
+          .fold(0)(_._1)
     }
 
     TestAndLearn[F, Int](probeInterval, tryNextCosts, bestCost).map { costAdvisor =>
