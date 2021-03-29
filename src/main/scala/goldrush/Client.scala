@@ -1,11 +1,8 @@
 package goldrush
 
-import cats.effect.Sync
 import cats.{Functor, MonadError}
 import io.circe
 import io.circe.generic.auto._
-import org.typelevel.log4cats.StructuredLogger
-import org.typelevel.log4cats.slf4j.Slf4jLogger
 import retry.{RetryPolicies, RetryPolicy, Sleep}
 import sttp.client3.circe._
 import sttp.client3.{HttpError, Response, ResponseException, SttpBackend, UriContext, emptyRequest}
@@ -20,7 +17,7 @@ trait Client[F[_]] {
   def cash(treasure: String): F[Seq[Int]]
 }
 
-class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
+class ClientImpl[F[_]: Functor: Sleep](
     baseUrl: String,
     backend: SttpBackend[F, Any]
 )(implicit E: MonadError[F, Throwable])
@@ -137,19 +134,6 @@ case class Area(posX: Int, posY: Int, sizeX: Int, sizeY: Int) {
       x = posX + dx - 1
       y = posY + dy - 1
     } yield (x, y)
-  }
-}
-
-object ClientImpl {
-  def apply[F[_]: Functor: Sleep: Sync](
-      baseUrl: String,
-      backend: SttpBackend[F, Any]
-  )(implicit E: MonadError[F, Throwable]): F[Client[F]] = {
-    import cats.syntax.functor._
-
-    Slf4jLogger.create[F].map { implicit logger =>
-      new ClientImpl[F](baseUrl, backend)
-    }
   }
 }
 

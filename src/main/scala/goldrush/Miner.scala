@@ -1,5 +1,7 @@
 package goldrush
 
+import java.util.concurrent.TimeUnit
+
 import cats.effect.concurrent.MVar
 import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.flatMap._
@@ -15,7 +17,7 @@ case class Miner[F[
     client: Client[F]
 ) {
   def mine: F[Int] = {
-    val digParallelism = 36
+    val digParallelism = 8
 
     val licensesR: Resource[F, F[Int]] = {
       for {
@@ -37,7 +39,7 @@ case class Miner[F[
       Observable
         .fromResource(licensesR)
         .flatMap { nextLicense =>
-          explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
+          explorator(client.explore)(Area(0, 0, 400, 400), 490_000)
             .mapParallelUnorderedF(digParallelism) { case (x, y, amount) =>
               def dig(
                   level: Int,
@@ -46,6 +48,7 @@ case class Miner[F[
                 for {
                   license <- nextLicense
                   newTreasures <- client.dig(license, x, y, level)
+                  _ = if (newTreasures.nonEmpty) print(s"${coorsEncoder.encode(x, y, level)};")
                   nextTreasures = foundTreasures ++ newTreasures
                   goDeeper = level < 10 && nextTreasures.size < amount
                   result <-
@@ -76,6 +79,8 @@ object Miner {
   type Y = Int
   type Amount = Int
   type Explorator = Observable[(X, Y, Amount)]
+
+  val coorsEncoder = new HexCoordsEncoder
 
   def exploratorBinary[F[_]: TaskLike](
       explore: Area => F[ExploreResponse]
@@ -120,7 +125,7 @@ object Miner {
     val coords = xs.flatMap(x => ys.flatMap(y => Observable.pure(x, y)))
 
     coords
-      .mapParallelUnorderedF(4) { case (x, y) =>
+      .mapParallelOrderedF(4) { case (x, y) =>
         explore(
           Area(
             x,
@@ -140,7 +145,7 @@ object Miner {
   def explorator[F[_]: TaskLike: Applicative](
       explore: Area => F[ExploreResponse]
   )(area: Area, amount: Int): Explorator = {
-    exploratorBatched(5)(explore)(area, amount)
+    exploratorBatched(10)(explore)(area, amount)
   }
 
 }

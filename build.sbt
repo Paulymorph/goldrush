@@ -29,11 +29,11 @@ libraryDependencies ++= Seq(
   "io.circe" %% "circe-parser"
 ).map(_ % circe)
 
-val log4cats = "1.2.0"
-libraryDependencies += "org.typelevel" %% "log4cats-slf4j" % log4cats
+//val log4cats = "1.2.0"
+//libraryDependencies += "org.typelevel" %% "log4cats-slf4j" % log4cats
 
-val logging = "1.7.30"
-libraryDependencies += "org.slf4j" % "slf4j-simple" % logging
+//val logging = "1.7.30"
+//libraryDependencies += "org.slf4j" % "slf4j-simple" % logging
 
 val scalatest = "3.2.5"
 libraryDependencies ++=
