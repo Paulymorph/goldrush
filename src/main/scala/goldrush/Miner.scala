@@ -1,13 +1,15 @@
 package goldrush
 
-import cats.effect.{Concurrent, ContextShift, Resource, Sync}
+import cats.effect.{Concurrent, ContextShift, Resource, Sync, Timer}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import cats.{Applicative, Parallel}
-import goldrush.Licenser.{Issuer, Licenser}
+import goldrush.Licenser.Licenser
 import goldrush.Miner._
 import monix.eval.{TaskLift, TaskLike}
 import monix.reactive.Observable
+
+import scala.concurrent.duration.DurationInt
 
 class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
     goldStore: GoldStore[F],
@@ -57,15 +59,15 @@ object Miner {
   type Amount = Int
   type Explorator = Observable[(X, Y, Amount)]
 
-  def apply[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLike: TaskLift](
-      client: Client[F]
+  def apply[F[_]: Parallel: Concurrent: ContextShift: TaskLike: TaskLift: Timer](
+      client: Client[F],
+      statistics: Statistics[F]
   ): Resource[F, Miner[F]] = {
     val digParallelism = 36
     for {
       goldStore <- Resource.liftF(GoldStoreImpl[F](2000))
-      licenser <- Resource.liftF(
-        Licenser.noBackground(Issuer.paidRandom(1, client, goldStore))
-      )
+      issuer <- Resource.liftF(Issuer.dynamic(20.seconds, client, goldStore, statistics))
+      licenser <- Resource.liftF(Licenser.noBackground(issuer))
       miner = new Miner[F](goldStore, licenser, client, digParallelism)
     } yield miner
   }

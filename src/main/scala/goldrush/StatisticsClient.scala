@@ -19,7 +19,9 @@ class StatisticsClient[F[_]: FlatMap] private (underlying: Client[F], statistics
     underlying.dig(licenseId, posX, posY, depth) <* statistics.digged()
 
   override def cash(treasure: String): F[Seq[Int]] =
-    underlying.cash(treasure)
+    underlying.cash(treasure).flatTap { coins =>
+      statistics.cashed(coins.length)
+    }
 }
 
 object StatisticsClient {

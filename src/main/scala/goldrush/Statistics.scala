@@ -31,6 +31,10 @@ class Statistics[F[_]](store: Ref[F, StatisticsInfo]) {
     info.copy(digTimes = info.digTimes + 1)
   }
 
+  def cashed(treasureSize: Int): F[Unit] = store.update { info =>
+    info.copy(foundCoins = info.foundCoins + treasureSize)
+  }
+
   val getInfo: F[StatisticsInfo] = store.get
 }
 
@@ -38,7 +42,8 @@ case class StatisticsInfo(
     issuedLicenses: Int,
     licensesCapacity: Int,
     spentCoins: Map[Int, LicenseStats],
-    digTimes: Int
+    digTimes: Int,
+    foundCoins: Int
 )
 
 case class LicenseStats(count: Int, min: Int, max: Int, sum: Int)
@@ -46,6 +51,6 @@ case class LicenseStats(count: Int, min: Int, max: Int, sum: Int)
 object Statistics {
   def apply[F[_]: Sync] =
     Ref
-      .of(StatisticsInfo(0, 0, Map.empty, 0))
+      .of(StatisticsInfo(0, 0, Map.empty, 0, 0))
       .map(new Statistics[F](_))
 }

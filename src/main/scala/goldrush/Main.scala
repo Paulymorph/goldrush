@@ -27,6 +27,6 @@ object Main extends TaskApp {
       backend <- AsyncHttpClientMonixBackend()
       client <- ClientImpl[Task](baseUrl, backend)
         .map(StatisticsClient.wrap(statistics))
-      _ <- Miner[Task](client).use(_.mine)
+      _ <- Miner[Task](client, statistics).use(_.mine)
     } yield ExitCode.Success
 }
