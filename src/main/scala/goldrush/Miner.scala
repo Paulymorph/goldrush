@@ -1,5 +1,7 @@
 package goldrush
 
+import java.util.concurrent.ConcurrentSkipListMap
+
 import cats.effect.{Concurrent, ContextShift, Resource, Sync}
 import cats.syntax.flatMap._
 import cats.syntax.functor._
@@ -17,25 +19,34 @@ class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLik
 ) {
   def mine: F[Int] = {
     val digger = {
+      val treasuresDepths = {
+        val depths = new ConcurrentSkipListMap[Int, Integer]()
+        Seq.range(0, 12).foreach(i => depths.put(i, 0))
+        depths
+      }
       explorator(client.explore)(Area(0, 0, 3500, 3500), 490_000)
         .mapParallelUnorderedF(digParallelism) { case (x, y, amount) =>
+          val levels = treasuresDepths.descendingKeySet().iterator()
+
           def dig(
-              level: Int,
               foundTreasures: Seq[String]
           ): F[Seq[String]] = {
             for {
               license <- licenser
+              level = levels.next()
               newTreasures <- client.dig(license, x, y, level)
+              _ = if (newTreasures.nonEmpty)
+                treasuresDepths.compute(level, { case (k, v) => if (v == null) 1 else v + 1 })
               nextTreasures = foundTreasures ++ newTreasures
               goDeeper = level < 10 && nextTreasures.size < amount
               result <-
                 if (goDeeper)
-                  dig(level + 1, nextTreasures)
+                  dig(nextTreasures)
                 else Applicative[F].pure(nextTreasures)
             } yield result
           }
 
-          dig(1, Seq.empty)
+          dig(Seq.empty)
         }
         .flatMap(Observable.fromIterable)
     }
