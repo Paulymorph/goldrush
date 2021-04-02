@@ -7,7 +7,7 @@ import cats.{Applicative, Parallel}
 import goldrush.Licenser.Licenser
 import goldrush.Miner._
 import monix.eval.{TaskLift, TaskLike}
-import monix.reactive.Observable
+import monix.reactive.{Observable, OverflowStrategy}
 
 import scala.concurrent.duration.DurationInt
 
@@ -43,7 +43,7 @@ class Miner[F[_]: Sync: Parallel: Applicative: Concurrent: ContextShift: TaskLik
     }
 
     val coins = digger
-      .mapParallelUnorderedF(digParallelism) { treasure =>
+      .mapParallelUnorderedF(Int.MaxValue) { treasure =>
         client.cash(treasure)
       }
       .flatMap(Observable.fromIterable)

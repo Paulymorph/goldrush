@@ -59,14 +59,25 @@ object Issuer {
     }
 
     val bestCost = statistics.getInfo.map {
-      case StatisticsInfo(_, _, spentCoins, digTimes, foundCoins) =>
-        val expectedDigProfit = if (digTimes == 0) 0 else foundCoins / digTimes
-        spentCoins
-          .maxByOption { case (cost, LicenseStats(count, _, _, sum)) =>
-            val expectedLicensesAvailable = if (count == 0) 0 else sum / count
-            expectedDigProfit * expectedLicensesAvailable - cost
-          }
-          .fold(0)(_._1)
+      case StatisticsInfo(_, _, spentCoins, digTimes, digsDuration, foundCoins, cashTimes, _) =>
+        import scala.concurrent.duration._
+        val fast = 0.millis
+        val meanDigTime = if (digTimes == 0) fast else digsDuration / digTimes
+        val freeLicenseTime = {
+          val stat = spentCoins.getOrElse(0, LicenseStats(0, 0, 0, 0, fast))
+          if (stat.count == 0) fast else stat.durationSum / stat.sum
+        }
+
+        if (meanDigTime <= freeLicenseTime) 0
+        else {
+          val expectedDigProfit = if (digTimes == 0) 0 else foundCoins / digTimes
+          spentCoins
+            .maxByOption { case (cost, LicenseStats(count, _, _, sum, duration)) =>
+              val expectedLicensesAvailable = if (count == 0) 0 else sum / count
+              expectedDigProfit * expectedLicensesAvailable - cost
+            }
+            .fold(0)(_._1)
+        }
     }
 
     TestAndLearn[F, Int](probeInterval, tryNextCosts, bestCost).map { costAdvisor =>
