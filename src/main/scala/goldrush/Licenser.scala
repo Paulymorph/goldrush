@@ -1,5 +1,8 @@
 package goldrush
 
+import java.util.concurrent.{LinkedBlockingQueue, TimeUnit}
+import java.util.concurrent.atomic.AtomicLong
+
 import cats.data.Chain
 import cats.{Applicative, Monad}
 import cats.effect.concurrent.{MVar, Ref}
@@ -10,6 +13,7 @@ import cats.syntax.functor._
 import cats.syntax.apply._
 import monix.eval.{TaskLift, TaskLike}
 
+import scala.concurrent.duration.Duration
 import scala.util.Random
 
 object Licenser {
@@ -27,6 +31,11 @@ object Licenser {
       _ <- Concurrent[F].background {
         Observable
           .repeat(())
+//          .timerRepeated(
+//            Duration(10, TimeUnit.MILLISECONDS),
+//            Duration(1, TimeUnit.MILLISECONDS),
+//            ()
+//          )
           .mapParallelUnorderedF(parallelism)(_ => issuer)
           .flatMapIterable { license =>
             Seq.fill(license.digAllowed - license.digUsed)(license.id)
@@ -35,6 +44,34 @@ object Licenser {
           .completedF[F]
       }
     } yield queue.take
+  }
+
+  def apply2[F[_]: Concurrent: TaskLike: TaskLift](
+      parallelism: Int,
+      issuer: Issuer[F]
+  ): Resource[F, Licenser[F]] = {
+    implicit val backPressure: OverflowStrategy[License] = OverflowStrategy.BackPressure(10)
+    val licensesQ = new LinkedBlockingQueue[Int](100)
+    for {
+      _ <- Concurrent[F].background {
+        Observable
+          .timerRepeated(
+            Duration(10, TimeUnit.MILLISECONDS),
+            Duration(1, TimeUnit.MILLISECONDS),
+            ()
+          )
+          .mapParallelUnorderedF[F, Option[License]](parallelism) { _ =>
+            if (licensesQ.size() < 25) issuer.map(Option(_))
+            else Applicative[F].pure(None)
+          }
+          .flatMap(Observable.fromIterable(_))
+          .map { x =>
+            Seq.range(0, x.digAllowed - x.digUsed).foreach(_ => licensesQ.add(x.id))
+            x
+          }
+          .completedF[F]
+      }
+    } yield Applicative[F].pure(licensesQ.take())
   }
 
   def noBackground[F[_]: Sync](issuer: Issuer[F]) = {

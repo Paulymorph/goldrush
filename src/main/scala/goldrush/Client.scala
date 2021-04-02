@@ -1,7 +1,7 @@
 package goldrush
 
 import cats.effect.Sync
-import cats.{Functor, MonadError}
+import cats.{Applicative, Functor, MonadError}
 import io.circe
 import io.circe.generic.auto._
 import org.typelevel.log4cats.{Logger, StructuredLogger}
@@ -33,6 +33,13 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
     )
   }
 
+  val endTime = System.nanoTime() + 1e9.toLong * 540
+
+  def isLate[T](default: => T)(f: () => F[T]): F[T] = {
+    if (System.nanoTime() < endTime) f()
+    else Applicative[F].pure(default)
+  }
+
   def getBalance(): F[Balance] = {
     val request =
       emptyRequest
@@ -55,24 +62,28 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
   }
 
   def issueLicense(coins: Int*): F[License] = {
-    val request =
-      emptyRequest
-        .post(uri"$baseUrl/licenses")
-        .body(coins)
-        .response(asJsonEither[ApiError, License])
-    unwrapInf("issueLicense") {
-      backend.send(request)
+    isLate(License(1, 100, 0)) { () =>
+      val request =
+        emptyRequest
+          .post(uri"$baseUrl/licenses")
+          .body(coins)
+          .response(asJsonEither[ApiError, License])
+      unwrapInf("issueLicense") {
+        backend.send(request)
+      }
     }
   }
 
   def explore(area: Area): F[ExploreResponse] = {
-    val request =
-      emptyRequest
-        .post(uri"$baseUrl/explore")
-        .body(area)
-        .response(asJsonEither[ApiError, ExploreResponse])
-    unwrapInf("explore") {
-      backend.send(request)
+    isLate(ExploreResponse(area, 0)) { () =>
+      val request =
+        emptyRequest
+          .post(uri"$baseUrl/explore")
+          .body(area)
+          .response(asJsonEither[ApiError, ExploreResponse])
+      unwrapInf("explore") {
+        backend.send(request)
+      }
     }
   }
 
@@ -82,20 +93,22 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
       posY: Int,
       depth: Int
   ): F[Seq[String]] = {
-    val r = DigRequest(licenseId, posX, posY, depth)
-    import cats.syntax.either._
-    val notFoundExpected = asJsonEither[ApiError, Seq[String]].map {
-      _.recover { case HttpError(_, StatusCode.NotFound) =>
-        Seq.empty
+    isLate(Seq.empty[String]) { () =>
+      val r = DigRequest(licenseId, posX, posY, depth)
+      import cats.syntax.either._
+      val notFoundExpected = asJsonEither[ApiError, Seq[String]].map {
+        _.recover { case HttpError(_, StatusCode.NotFound) =>
+          Seq.empty
+        }
       }
-    }
-    val request =
-      emptyRequest
-        .post(uri"$baseUrl/dig")
-        .body(r)
-        .response(notFoundExpected)
-    unwrapInf("dig") {
-      backend.send(request)
+      val request =
+        emptyRequest
+          .post(uri"$baseUrl/dig")
+          .body(r)
+          .response(notFoundExpected)
+      unwrapInf("dig") {
+        backend.send(request)
+      }
     }
   }
 

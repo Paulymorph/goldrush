@@ -1,6 +1,9 @@
 package goldrush
 
+import java.util.Collections
+import java.util.concurrent.PriorityBlockingQueue
 import java.util.concurrent.atomic.AtomicLong
+
 import goldrush.Miner.Explorator
 import monix.eval.Coeval
 import monix.execution.Scheduler
@@ -81,6 +84,21 @@ class MinerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
         foundPositions.sorted shouldBe expected.sorted
       }
     }
+  }
+
+  "priority" should "return max" in {
+    val prirityQ = new PriorityBlockingQueue[ExploreResponse](
+      1000,
+      Collections.reverseOrder((o1: ExploreResponse, o2: ExploreResponse) =>
+        o1.amount.compareTo(o2.amount)
+      )
+    )
+
+    prirityQ.put(ExploreResponse(Area(1, 2, 3, 4), 1))
+    prirityQ.put(ExploreResponse(Area(1, 2, 3, 4), 2))
+    prirityQ.put(ExploreResponse(Area(1, 2, 3, 4), 3))
+
+    prirityQ.take() shouldBe (ExploreResponse(Area(1, 2, 3, 4), 3))
   }
 
   type ExploreMethod = (Area => Coeval[ExploreResponse]) => (Area, Int) => Explorator
