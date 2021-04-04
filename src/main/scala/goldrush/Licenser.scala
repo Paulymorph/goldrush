@@ -1,7 +1,8 @@
 package goldrush
 
 import cats.data.Chain
-import cats.{Applicative, Monad}
+import Issuer.Issuer
+import cats.Applicative
 import cats.effect.concurrent.{MVar, Ref}
 import cats.effect.{Concurrent, Resource, Sync}
 import monix.reactive.{Observable, OverflowStrategy}
@@ -10,12 +11,9 @@ import cats.syntax.functor._
 import cats.syntax.apply._
 import monix.eval.{TaskLift, TaskLike}
 
-import scala.util.Random
-
 object Licenser {
   type LicenseId = Int
   type Licenser[F[_]] = F[LicenseId]
-  type Issuer[F[_]] = F[License]
 
   def apply[F[_]: Concurrent: TaskLike: TaskLift](
       parallelism: Int,
@@ -53,31 +51,6 @@ object Licenser {
     }
     Ref.of[F, Chain[LicenseId]](Chain.empty[LicenseId]).map { licenseStore =>
       retrieveOrIssue(licenseStore)
-    }
-  }
-
-  object Issuer {
-    def free[F[_]](client: Client[F]): Issuer[F] = {
-      client.issueLicense()
-    }
-
-    def paid[F[_]: Monad](howMany: Int, client: Client[F], store: GoldStore[F]): Issuer[F] = {
-      for {
-        coins <- store.tryTake(howMany)
-        license <- client.issueLicense(coins: _*)
-      } yield license
-    }
-
-    def paidRandom[F[_]: Monad: Sync](
-        max: Int,
-        client: Client[F],
-        store: GoldStore[F]
-    ): Issuer[F] = {
-      for {
-        r <- Sync[F].delay(Random.nextInt(max + 1))
-        coins <- store.tryTake(r)
-        license <- client.issueLicense(coins: _*)
-      } yield license
     }
   }
 }
