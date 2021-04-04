@@ -1,0 +1,1 @@
+To build the image run `docker build .`
