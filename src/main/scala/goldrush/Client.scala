@@ -1,12 +1,8 @@
 package goldrush
 
-import cats.effect.Sync
 import cats.{Functor, MonadError}
 import io.circe
 import io.circe.generic.auto._
-import org.typelevel.log4cats.{Logger, StructuredLogger}
-import org.typelevel.log4cats.slf4j.Slf4jLogger
-import retry.{RetryPolicies, RetryPolicy, Sleep}
 import sttp.client3.circe._
 import sttp.client3.{HttpError, Response, ResponseException, SttpBackend, UriContext, emptyRequest}
 import sttp.model.{MediaType, StatusCode}
@@ -20,18 +16,11 @@ trait Client[F[_]] {
   def cash(treasure: String): F[Seq[Int]]
 }
 
-class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
+class ClientImpl[F[_]: Functor](
     baseUrl: String,
     backend: SttpBackend[F, Any]
 )(implicit E: MonadError[F, Throwable])
     extends Client[F] {
-  private val infPolicy: RetryPolicy[F] = {
-    import scala.concurrent.duration._
-    RetryPolicies.capDelay(
-      100.millis,
-      RetryPolicies.fullJitter(5.millis)
-    )
-  }
 
   def getBalance(): F[Balance] = {
     val request =
@@ -116,20 +105,21 @@ class ClientImpl[F[_]: Functor: Sleep: StructuredLogger](
   ): F[T] = {
     import cats.syntax.functor._
     import cats.syntax.monadError._
-    import retry.syntax.all._
 
-    request
-      .map(_.body)
-      .rethrow
-      .retryingOnAllErrors(
-        infPolicy,
-        retry.noop
-      )
+    MonadError[F, Throwable].handleErrorWith(
+      request
+        .map(_.body)
+        .rethrow
+    )(_ => unwrapInf(operation)(request))
   }
 }
 
-case class Area(posX: Int, posY: Int, sizeX: Int, sizeY: Int) {
-  lazy val locations: Seq[(Int, Int)] = {
+case class Area(posX: Int, posY: Int, sizeX: Int, sizeY: Int)
+
+object Area {
+
+  def locations(area: Area): Seq[(Int, Int)] = {
+    import area._
     val yds = 1 to sizeY
     for {
       dx <- 1 to sizeX
@@ -140,18 +130,7 @@ case class Area(posX: Int, posY: Int, sizeX: Int, sizeY: Int) {
   }
 }
 
-object ClientImpl {
-  def apply[F[_]: Functor: Sleep: Sync](
-      baseUrl: String,
-      backend: SttpBackend[F, Any]
-  )(implicit E: MonadError[F, Throwable]): F[Client[F]] = {
-    import cats.syntax.functor._
 
-    Slf4jLogger.create[F].map { implicit logger =>
-      new ClientImpl[F](baseUrl, backend)
-    }
-  }
-}
 
 case class ExploreResponse(area: Area, amount: Int)
 

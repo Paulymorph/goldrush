@@ -8,4 +8,6 @@ RUN sbt '; set assemblyJarName in assembly := "app.jar"\
 FROM openjdk:15.0.2 AS run
 WORKDIR /goldrush
 COPY --from=build /app/app.jar app.jar
+ENV JAVA_OPTS="-Xms1536m -Xmx2g"
+ENV _JAVA_OPTIONS="-Xms1536m -Xmx2g"
 ENTRYPOINT ["java", "-jar", "app.jar"]
